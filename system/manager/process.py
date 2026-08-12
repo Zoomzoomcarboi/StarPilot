@@ -467,6 +467,9 @@ class ManagerProcess(ABC):
   should_run: Callable[[bool, Params, car.CarParams, SimpleNamespace], bool]
   proc: Process | None = None
   enabled = True
+  # ProcessState.shouldBeRunning is consumed by selfdrived as control-health
+  # eligibility. Auxiliary processes opt out while remaining fully managed.
+  control_critical = True
   name = ""
 
   last_watchdog_time = 0
@@ -576,14 +579,15 @@ class ManagerProcess(ABC):
     state.name = self.name
     if self.proc:
       state.running = self.proc.is_alive()
-      state.shouldBeRunning = self.proc is not None and not self.shutting_down
+      state.shouldBeRunning = self.control_critical and self.proc is not None and not self.shutting_down
       state.pid = self.proc.pid or 0
       state.exitCode = self.proc.exitcode or 0
     return state
 
 
 class NativeProcess(ManagerProcess):
-  def __init__(self, name, cwd, cmdline, should_run, enabled=True, sigkill=False, watchdog_max_dt=None, nice=None):
+  def __init__(self, name, cwd, cmdline, should_run, enabled=True, sigkill=False, watchdog_max_dt=None, nice=None,
+               control_critical=True):
     self.name = name
     self.cwd = cwd
     self.cmdline = cmdline
@@ -592,6 +596,7 @@ class NativeProcess(ManagerProcess):
     self.sigkill = sigkill
     self.watchdog_max_dt = watchdog_max_dt
     self.nice = nice
+    self.control_critical = control_critical
     self.launcher = nativelauncher
 
   def prepare(self) -> None:
@@ -615,7 +620,8 @@ class NativeProcess(ManagerProcess):
 
 
 class PythonProcess(ManagerProcess):
-  def __init__(self, name, module, should_run, enabled=True, sigkill=False, watchdog_max_dt=None, nice=None):
+  def __init__(self, name, module, should_run, enabled=True, sigkill=False, watchdog_max_dt=None, nice=None,
+               control_critical=True):
     self.name = name
     self.module = module
     self.should_run = should_run
@@ -623,6 +629,7 @@ class PythonProcess(ManagerProcess):
     self.sigkill = sigkill
     self.watchdog_max_dt = watchdog_max_dt
     self.nice = nice
+    self.control_critical = control_critical
     self.launcher = launcher
 
   def prepare(self) -> None:

@@ -253,6 +253,8 @@ else:
   procs.append(PythonProcess("ui", "selfdrive.ui.ui", always_run, watchdog_max_dt=UI_WATCHDOG_MAX_DT))
 
 procs += [
+  PythonProcess("rave_linkd", "starpilot.system.rave_linkd.rave_linkd", always_run,
+                enabled=TICI, nice=10, control_critical=False),
   PythonProcess("device_syncd", "starpilot.system.device_syncd", always_run),
   PythonProcess("starpilot_process", "starpilot.starpilot_process", always_run),
   PythonProcess("mapd", "starpilot.navigation.mapd_wrapper", always_run, nice=19),

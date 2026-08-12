@@ -10,7 +10,8 @@ from cereal import car
 from openpilot.common.params import Params
 import openpilot.system.manager.manager as manager
 from openpilot.system.manager.process import ensure_running
-from openpilot.system.manager.process_config import BigDeviceUIProcess, managed_processes, procs
+from openpilot.system.manager.process import PythonProcess
+from openpilot.system.manager.process_config import BigDeviceUIProcess, always_run, managed_processes, procs
 from openpilot.system.hardware import HARDWARE
 
 os.environ['FAKEUPLOAD'] = "1"
@@ -268,6 +269,54 @@ class TestManager:
 
   def test_duplicate_procs(self):
     assert len(procs) == len(managed_processes), "Duplicate process names"
+
+  def test_processes_are_control_critical_by_default(self):
+    proc = PythonProcess("test", "test.module", always_run)
+    assert proc.control_critical
+
+  def test_rave_linkd_is_managed_but_not_control_critical(self):
+    proc = managed_processes["rave_linkd"]
+    assert not proc.control_critical
+    assert proc.should_run(False, Params(), car.CarParams.new_message(), SimpleNamespace())
+
+  def test_noncritical_process_state_is_excluded_from_control_health(self):
+    proc = PythonProcess("auxiliary", "test.module", always_run, control_critical=False)
+    proc.proc = SimpleNamespace(is_alive=lambda: False, pid=123, exitcode=1)
+    state = proc.get_process_state_msg()
+    assert not state.running
+    assert not state.shouldBeRunning
+    assert state.pid == 123
+    # This is the exact predicate used by selfdrived before adding
+    # processNotRunning; an empty result cannot affect engageability.
+    not_running = {p.name for p in [state] if not p.running and p.shouldBeRunning}
+    assert not not_running
+
+  def test_critical_process_state_remains_control_health_eligible(self):
+    proc = PythonProcess("critical", "test.module", always_run)
+    proc.proc = SimpleNamespace(is_alive=lambda: False, pid=124, exitcode=1)
+    state = proc.get_process_state_msg()
+    assert not state.running
+    assert state.shouldBeRunning
+    not_running = {p.name for p in [state] if not p.running and p.shouldBeRunning}
+    assert not_running == {"critical"}
+
+  def test_manager_reaps_and_restarts_noncritical_process(self, monkeypatch):
+    proc = PythonProcess("auxiliary", "test.module", always_run, control_critical=False)
+    proc.proc = SimpleNamespace(exitcode=1)
+    calls = []
+
+    def stop(retry=True, **_kwargs):
+      calls.append(("stop", retry))
+      proc.proc = None
+
+    def start():
+      calls.append(("start", None))
+      proc.proc = SimpleNamespace(exitcode=None)
+
+    monkeypatch.setattr(proc, "stop", stop)
+    monkeypatch.setattr(proc, "start", start)
+    ensure_running([proc], False, Params(), car.CarParams.new_message(), starpilot_toggles=SimpleNamespace())
+    assert calls == [("stop", False), ("start", None)]
 
   def test_remote_access_procs_start_before_ui(self):
     names = [p.name for p in procs]
