@@ -64,6 +64,19 @@ class TestParams:
     self.params.remove("CarParams")
     assert self.params.get("CarParams") is None
 
+  def test_rave_memory_command_is_shared_and_consumed(self):
+    ui_params = Params(memory=True)
+    daemon_params = Params(memory=True)
+    ui_params.put_bool("RavePairRequest", True)
+    assert daemon_params.get_bool("RavePairRequest")
+    daemon_params.remove("RavePairRequest")
+    assert not ui_params.get_bool("RavePairRequest")
+
+  def test_rave_pairing_key_is_bytes(self):
+    key = bytes(range(32))
+    self.params.put("RavePairingKey", key)
+    assert self.params.get("RavePairingKey") == key
+
   def test_get_bool(self):
     self.params.remove("IsMetric")
     assert not self.params.get_bool("IsMetric")

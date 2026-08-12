@@ -303,7 +303,64 @@ struct StarPilotLateralState @0xc2243c65e0340384 {
   unwindDetected @7 :Bool;
 }
 
-struct CustomReserved12 @0x9ccdc8676701b412 {
+struct RaveState @0x9ccdc8676701b412 {
+  connectionState @0 :ConnectionState;
+  health @1 :RaveHealth;
+  leftLane @2 :LaneState;
+  rightLane @3 :LaneState;
+  leftThreat @4 :ThreatLevel;
+  rightThreat @5 :ThreatLevel;
+  enabled @6 :Bool;
+  paired @7 :Bool;
+  peerName @8 :Text;
+  reason @9 :RaveStatusReason;
+  packetAgeMs @10 :UInt16;
+  vehicleStateTxHz @11 :Float32;
+  raveStateRxHz @12 :Float32;
+  staleCount @13 :UInt32;
+  authFailureCount @14 :UInt32;
+  malformedCount @15 :UInt32;
+  peerRestartCount @16 :UInt32;
+
+  enum ConnectionState {
+    disabled @0;
+    notPaired @1;
+    pairing @2;
+    waiting @3;
+    connected @4;
+    stale @5;
+    error @6;
+  }
+
+  enum RaveHealth {
+    unknown @0;
+    ok @1;
+    degraded @2;
+    fault @3;
+  }
+
+  enum LaneState {
+    unknown @0;
+    clear @1;
+    occupied @2;
+  }
+
+  enum ThreatLevel {
+    none @0;
+    watch @1;
+    warning @2;
+  }
+
+  enum RaveStatusReason {
+    none @0;
+    networkUnavailable @1;
+    networkConflict @2;
+    notPaired @3;
+    credentialInvalid @4;
+    authenticationFailure @5;
+    protocolMismatch @6;
+    peerFault @7;
+  }
 }
 
 struct CustomReserved13 @0xcd96dafb67a082d0 {
