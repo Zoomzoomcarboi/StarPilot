@@ -45,9 +45,11 @@ NM_ACTIVE_CONNECTION_IFACE = 'org.freedesktop.NetworkManager.Connection.Active'
 NM_WIRELESS_IFACE = 'org.freedesktop.NetworkManager.Device.Wireless'
 NM_PROPERTIES_IFACE = 'org.freedesktop.DBus.Properties'
 NM_DEVICE_IFACE = 'org.freedesktop.NetworkManager.Device'
+NM_WIRED_IFACE = 'org.freedesktop.NetworkManager.Device.Wired'
 NM_IP4_CONFIG_IFACE = 'org.freedesktop.NetworkManager.IP4Config'
 
 NM_DEVICE_TYPE_WIFI = 2
+NM_DEVICE_TYPE_ETHERNET = 1
 NM_DEVICE_TYPE_MODEM = 8
 
 # https://developer.gnome.org/NetworkManager/1.26/nm-dbus-types.html#NM80211ApFlags
