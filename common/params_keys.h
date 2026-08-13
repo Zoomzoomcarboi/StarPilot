@@ -149,6 +149,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"RavePairConfirm", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
     {"RavePairCancel", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
     {"RaveForgetRequest", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"RaveNetworkProfileUuid", {PERSISTENT | DONT_LOG, STRING}},
+    {"RaveNetworkStatus", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON, "{\"state\":\"disabled\",\"reason\":\"none\"}"}},
     {"SnoozeUpdate", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"SshEnabled", {PERSISTENT, BOOL}},
     {"TermsVersion", {PERSISTENT, STRING}},

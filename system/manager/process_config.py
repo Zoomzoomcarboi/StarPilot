@@ -104,6 +104,9 @@ def run_navigationd(started: bool, params: Params, CP: car.CarParams, starpilot_
 def run_v_asm(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
   return started and getattr(starpilot_toggles, "v_asm_enabled", False)
 
+def run_rave_networkd(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
+  return params.get_bool("RaveEnabled")
+
 
 class BigDeviceUIProcess:
   name = "ui"
@@ -255,6 +258,8 @@ else:
 procs += [
   PythonProcess("rave_linkd", "starpilot.system.rave_linkd.rave_linkd", always_run,
                 enabled=TICI, nice=10, control_critical=False),
+  PythonProcess("rave_networkd", "starpilot.system.rave_networkd.rave_networkd", run_rave_networkd,
+                enabled=TICI, nice=19, control_critical=False),
   PythonProcess("device_syncd", "starpilot.system.device_syncd", always_run),
   PythonProcess("starpilot_process", "starpilot.starpilot_process", always_run),
   PythonProcess("mapd", "starpilot.navigation.mapd_wrapper", always_run, nice=19),

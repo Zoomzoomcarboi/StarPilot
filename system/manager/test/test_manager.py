@@ -279,6 +279,34 @@ class TestManager:
     assert not proc.control_critical
     assert proc.should_run(False, Params(), car.CarParams.new_message(), SimpleNamespace())
 
+  def test_rave_networkd_is_noncritical_and_follows_enabled_param(self):
+    proc = managed_processes["rave_networkd"]
+    params = Params()
+    assert not proc.control_critical
+    params.put_bool("RaveEnabled", False)
+    assert not proc.should_run(False, params, car.CarParams.new_message(), SimpleNamespace())
+    params.put_bool("RaveEnabled", True)
+    assert proc.should_run(False, params, car.CarParams.new_message(), SimpleNamespace())
+    assert proc.should_run(True, params, car.CarParams.new_message(), SimpleNamespace())
+    params.put_bool("RaveEnabled", False)
+    assert not proc.should_run(True, params, car.CarParams.new_message(), SimpleNamespace())
+
+  def test_rave_networkd_dynamically_starts_and_stops(self, monkeypatch):
+    proc = managed_processes["rave_networkd"]
+    params = Params()
+    calls = []
+    monkeypatch.setattr(proc, "start", lambda: calls.append("start"))
+    monkeypatch.setattr(proc, "stop", lambda **_kwargs: calls.append("stop"))
+    monkeypatch.setattr(proc, "check_watchdog", lambda _started: None)
+    monkeypatch.setattr(proc, "enabled", True)
+    params.put_bool("RaveEnabled", False)
+    ensure_running([proc], False, params, car.CarParams.new_message(), starpilot_toggles=SimpleNamespace())
+    params.put_bool("RaveEnabled", True)
+    ensure_running([proc], False, params, car.CarParams.new_message(), starpilot_toggles=SimpleNamespace())
+    params.put_bool("RaveEnabled", False)
+    ensure_running([proc], False, params, car.CarParams.new_message(), starpilot_toggles=SimpleNamespace())
+    assert calls == ["stop", "start", "stop"]
+
   def test_noncritical_process_state_is_excluded_from_control_health(self):
     proc = PythonProcess("auxiliary", "test.module", always_run, control_critical=False)
     proc.proc = SimpleNamespace(is_alive=lambda: False, pid=123, exitcode=1)

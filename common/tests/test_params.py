@@ -77,6 +77,13 @@ class TestParams:
     self.params.put("RavePairingKey", key)
     assert self.params.get("RavePairingKey") == key
 
+  def test_rave_network_profile_ownership_and_status_params(self):
+    profile_uuid = str(uuid.uuid4())
+    self.params.put("RaveNetworkProfileUuid", profile_uuid)
+    self.params.put("RaveNetworkStatus", {"state": "connected", "reason": "none"})
+    assert self.params.get("RaveNetworkProfileUuid") == profile_uuid
+    assert self.params.get("RaveNetworkStatus") == {"state": "connected", "reason": "none"}
+
   def test_get_bool(self):
     self.params.remove("IsMetric")
     assert not self.params.get_bool("IsMetric")
