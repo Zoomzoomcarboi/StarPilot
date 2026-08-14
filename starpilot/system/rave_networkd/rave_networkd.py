@@ -21,7 +21,7 @@ RETRY_DELAYS = (2.0, 5.0, 10.0, 30.0)
 VALID_STATES = frozenset(("disabled", "adapterMissing", "adapterAmbiguous", "configuring", "connected",
                           "profileConflict", "networkError"))
 VALID_REASONS = frozenset(("none", "noAdapter", "multipleAdapters", "ownedProfileMissing", "ownershipMismatch",
-                           "onroadChangeBlocked", "adapterChanged", "authorizationFailed", "networkManagerUnavailable",
+                           "onroadChangeBlocked", "authorizationFailed", "networkManagerUnavailable",
                            "adapterDisappeared", "addressMismatch", "defaultRouteChanged", "primaryConnectionChanged",
                            "dnsChanged", "ipv6RouteChanged", "activationFailed", "profileRejected"))
 
@@ -32,7 +32,6 @@ def profile_settings(profile_uuid: str, adapter: Adapter) -> dict[str, dict[str,
       "id": ("s", PROFILE_NAME), "uuid": ("s", profile_uuid), "type": ("s", "802-3-ethernet"),
       "autoconnect": ("b", True), "autoconnect-retries": ("i", 0), "autoconnect-priority": ("i", 100),
     },
-    "802-3-ethernet": {"mac-address": ("ay", bytes.fromhex(adapter.permanent_mac.replace(":", "")))},
     "ipv4": {
       "method": ("s", "manual"),
       "address-data": ("aa{sv}", [{"address": ("s", "10.77.0.2"), "prefix": ("u", 24)}]),
@@ -44,6 +43,8 @@ def profile_settings(profile_uuid: str, adapter: Adapter) -> dict[str, dict[str,
 
 
 def profile_is_exact(profile: Profile, adapter: Adapter) -> bool:
+  if "mac-address" in profile.settings.get("802-3-ethernet", {}):
+    return False
   expected = profile_settings(profile.uuid, adapter)
   for section, values in expected.items():
     actual = profile.settings.get(section, {})
@@ -51,10 +52,9 @@ def profile_is_exact(profile: Profile, adapter: Adapter) -> bool:
       actual_value = actual.get(key)
       if actual_value is None and value in (("s", ""), ("au", []), ("as", [])):
         continue
-      if section == "802-3-ethernet" and key == "mac-address" and actual_value is not None:
-        if bytes(actual_value[1]) != bytes(value[1]):
-          return False
-      elif actual_value != value:
+      if section == "connection" and key == "autoconnect" and actual_value is None and value == ("b", True):
+        continue
+      if actual_value != value:
         return False
   return True
 
@@ -126,17 +126,8 @@ class RaveNetworkDaemon:
           return status("profileConflict", "ownedProfileMissing", adapter)
         owned_uuid = None
 
-      adapter_changed = False
-      if owned is not None:
-        mac = owned.settings.get("802-3-ethernet", {}).get("mac-address", ("ay", b""))[1]
-        expected_mac = bytes.fromhex(adapter.permanent_mac.replace(":", ""))
-        if bytes(mac) != expected_mac:
-          if not offroad:
-            return status("profileConflict", "adapterChanged", adapter)
-          adapter_changed = True
-
       needs_create = owned is None
-      needs_update = owned is not None and (adapter_changed or not profile_is_exact(owned, adapter))
+      needs_update = owned is not None and not profile_is_exact(owned, adapter)
       active = self.backend.active_profile_on_device(adapter)
       needs_takeover = active is not None and (owned is None or active.uuid != owned.uuid)
       if not offroad and (needs_create or needs_update or needs_takeover):
