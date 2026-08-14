@@ -104,13 +104,17 @@ def test_supported_usb_driver_resolution(tmp_path, driver):
   usb = tmp_path / "usb" / "1-1"
   device = usb / "1-1:1.0"
   drivers = tmp_path / "drivers"
+  subsystems = tmp_path / "subsystems"
   device.mkdir(parents=True)
   (drivers / driver).mkdir(parents=True)
+  (subsystems / "usb").mkdir(parents=True)
   (usb / "idVendor").write_text("0b95\n")
   (usb / "idProduct").write_text("1790\n")
+  (usb / "serial").write_text("00249B895932\n")
   (sys_net / "renamed0").mkdir(parents=True)
   (sys_net / "renamed0" / "device").symlink_to(device, target_is_directory=True)
   (device / "driver").symlink_to(drivers / driver, target_is_directory=True)
+  (device / "subsystem").symlink_to(subsystems / "usb", target_is_directory=True)
   assert _driver_from_sysfs("renamed0", sys_net) == (driver, "0b95", "1790")
 
 
@@ -136,6 +140,29 @@ def test_supported_usb_ethernet_detected_without_permanent_mac(tmp_path, driver)
     {"DeviceType": ("u", 1), "Interface": ("s", "any-name")} if interface.endswith(".Device") else {}
   )
   assert client.list_adapters() == [Adapter("/device", "any-name", driver, "", "0b95", "1790")]
+
+
+def test_supported_usb_ethernet_detected_without_diagnostic_identifiers(tmp_path):
+  sys_net = tmp_path / "net"
+  device = tmp_path / "usb" / "1-1" / "1-1:1.0"
+  driver_path = tmp_path / "drivers" / "ax88179_178a"
+  usb_subsystem = tmp_path / "subsystems" / "usb"
+  device.mkdir(parents=True)
+  driver_path.mkdir(parents=True)
+  usb_subsystem.mkdir(parents=True)
+  (sys_net / "eth0").mkdir(parents=True)
+  (sys_net / "eth0" / "device").symlink_to(device, target_is_directory=True)
+  (device / "driver").symlink_to(driver_path, target_is_directory=True)
+  (device / "subsystem").symlink_to(usb_subsystem, target_is_directory=True)
+
+  client = object.__new__(NetworkManagerClient)
+  client._sys_class_net = sys_net
+  client._nm = object()
+  client._call = lambda *_args: (["/device"],)
+  client._properties = lambda _path, interface: (
+    {"DeviceType": ("u", 1), "Interface": ("s", "eth0")} if interface.endswith(".Device") else {}
+  )
+  assert client.list_adapters() == [Adapter("/device", "eth0", "ax88179_178a", "")]
 
 
 @pytest.mark.parametrize("driver,with_usb_ancestry", [("cdc_ether", True), ("ax88179_178a", False)])

@@ -79,11 +79,10 @@ def _device_details_from_sysfs(interface: str, sys_class_net: Path) -> tuple[str
       subsystem = parent / "subsystem"
       if os.path.basename(os.path.realpath(subsystem)) == "usb" or vendor_path.is_file() or product_path.is_file():
         usb_ancestry = True
-        if vendor_path.is_file():
+        if vendor_path.is_file() and product_path.is_file():
           vendor = vendor_path.read_text().strip().lower()
-        if product_path.is_file():
           product = product_path.read_text().strip().lower()
-        break
+          break
   except OSError:
     pass
   return driver, usb_ancestry, vendor, product
