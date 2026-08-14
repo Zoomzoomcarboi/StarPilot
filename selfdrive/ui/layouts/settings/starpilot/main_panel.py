@@ -16,6 +16,7 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.maps import StarPilotMaps
 from openpilot.selfdrive.ui.layouts.settings.starpilot.system_settings import StarPilotSystemLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.appearance import StarPilotAppearanceLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.vehicle import StarPilotVehicleSettingsLayout
+from openpilot.selfdrive.ui.layouts.settings.starpilot.rave import StarPilotRaveLayout
 
 from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import TileGrid, HubTile, SPACING, BreadcrumbController, AETHER_LIST_METRICS, AetherListColors, draw_rounded_fill, draw_rounded_stroke
 
@@ -51,6 +52,17 @@ class StarPilotLayout(Widget):
       "icon": "vehicle",
       "panel": "VEHICLE",
     },
+    {
+      "title": "RAVE",
+      "icon": "rave",
+      "panel": "RAVE",
+      "title_colors": (
+        rl.Color(239, 94, 84, 255),
+        rl.Color(241, 181, 72, 255),
+        rl.Color(70, 181, 151, 255),
+        rl.Color(126, 108, 224, 255),
+      ),
+    },
   ]
 
   def __init__(self):
@@ -77,6 +89,7 @@ class StarPilotLayout(Widget):
       StarPilotPanelType.MAPS: StarPilotPanelInfo(tr_noop("Map Data"), StarPilotMapsLayout()),
       StarPilotPanelType.VISUALS: StarPilotPanelInfo(tr_noop("Appearance"), StarPilotAppearanceLayout()),
       StarPilotPanelType.VEHICLE: StarPilotPanelInfo(tr_noop("Vehicle Settings"), StarPilotVehicleSettingsLayout()),
+      StarPilotPanelType.RAVE: StarPilotPanelInfo(tr_noop("RAVE Settings"), StarPilotRaveLayout()),
     }
 
     self._setup_sub_panels(
@@ -87,10 +100,11 @@ class StarPilotLayout(Widget):
       StarPilotPanelType.MAPS,
       StarPilotPanelType.VISUALS,
       StarPilotPanelType.VEHICLE,
+      StarPilotPanelType.RAVE,
     )
 
     self._breadcrumbs = BreadcrumbController()
-    self._main_grid = TileGrid(columns=None, padding=SPACING.tile_gap)
+    self._main_grid = TileGrid(columns=None, padding=SPACING.tile_gap, uniform_width=True)
     self._rebuild_grid()
 
   def set_depth_callback(self, callback: Callable):
@@ -179,6 +193,7 @@ class StarPilotLayout(Widget):
       "MAPS": StarPilotPanelType.MAPS,
       "VISUALS": StarPilotPanelType.VISUALS,
       "VEHICLE": StarPilotPanelType.VEHICLE,
+      "RAVE": StarPilotPanelType.RAVE,
     }
 
     if self._current_category_idx is None:
@@ -200,7 +215,8 @@ class StarPilotLayout(Widget):
           desc=tr(cat.get("desc", "")),
           icon_key=cat["icon"],
           on_click=on_click,
-          bg_color=cat.get("color")
+          bg_color=cat.get("color"),
+          title_colors=cat.get("title_colors"),
         )
         self._main_grid.add_tile(tile)
     else:
@@ -224,7 +240,8 @@ class StarPilotLayout(Widget):
           desc="",
           icon_key=btn_icon,
           on_click=on_btn_click,
-          bg_color=cat.get("color")
+          bg_color=cat.get("color"),
+          title_colors=cat.get("title_colors"),
         )
         self._main_grid.add_tile(tile)
 

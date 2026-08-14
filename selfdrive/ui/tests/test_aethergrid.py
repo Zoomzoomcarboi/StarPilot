@@ -269,6 +269,48 @@ class TestAethergridContracts(unittest.TestCase):
 
     self.assertEqual(tile.get_status(), "Download 50%")
 
+  def test_hub_tile_accepts_rave_icon_and_static_title_colors(self):
+    mod = _import_aethergrid()
+    colors = tuple(mod.rl.Color(i, i, i, 255) for i in range(4))
+    tile = mod.HubTile("RAVE", "", icon_key="rave", title_colors=colors)
+
+    self.assertEqual(tile.custom_icon_key, "rave")
+    self.assertEqual(tile.title_colors, colors)
+
+  def test_hub_tile_draws_static_rave_title_colors_per_letter(self):
+    mod = _import_aethergrid()
+    colors = tuple(mod.rl.Color(i, i, i, 255) for i in range(4))
+    tile = mod.HubTile("RAVE", "", title_colors=colors)
+    draw_text = MagicMock()
+
+    with patch.object(tile, "_render_hud_background", return_value=(mod.rl.Rectangle(0, 0, 500, 220), mod.rl.WHITE)), \
+         patch.object(mod.rl, "draw_text_ex", draw_text):
+      tile._render(mod.rl.Rectangle(0, 0, 500, 220))
+
+    self.assertEqual(draw_text.call_count, 4)
+    self.assertEqual(tuple(call.args[-1] for call in draw_text.call_args_list), colors)
+
+  def test_rave_icon_uses_rear_viewport_camera_and_lens_geometry(self):
+    _import_aethergrid()
+    scribble = sys.modules["openpilot.selfdrive.ui.layouts.settings.starpilot.scribble"]
+    body = MagicMock()
+    lens = MagicMock()
+    lines = MagicMock()
+    corners = MagicMock()
+
+    with patch.object(scribble.rl, "draw_rectangle_rounded_lines_ex", body), \
+         patch.object(scribble.rl, "draw_ring", lens), \
+         patch.object(scribble.rl, "draw_line_ex", lines), \
+         patch.object(scribble.rl, "draw_circle_v", corners, create=True):
+      scribble._draw_custom_icon_geometry("rave", 0, 0, 1.0, scribble.rl.WHITE)
+
+    body.assert_called_once()
+    lens.assert_called_once()
+    self.assertEqual(lines.call_count, 12)
+    self.assertEqual(corners.call_count, 4)
+    self.assertEqual((body.call_args.args[0].x, body.call_args.args[0].y), (14.0, 31.0))
+    self.assertEqual((lens.call_args.args[0].x, lens.call_args.args[0].y), (30.0, 42.0))
+
   def test_custom_icon_draws_directly_while_cache_fill_is_pending(self):
     mod = _import_aethergrid()
     scribble = sys.modules["openpilot.selfdrive.ui.layouts.settings.starpilot.scribble"]
@@ -333,6 +375,22 @@ class TestAethergridContracts(unittest.TestCase):
 
     self.assertTrue(spies[0].rects)
     self.assertGreater(spies[0].rects[0].width, 300)
+
+  def test_uniform_tile_grid_centers_incomplete_final_row_without_stretching(self):
+    mod = _import_aethergrid()
+    grid = mod.TileGrid(columns=4, padding=10, uniform_width=True, tile_height=140)
+    spies = [RenderSpy() for _ in range(7)]
+    for spy in spies:
+      grid.add_tile(spy)
+
+    grid.render(mod.rl.Rectangle(0, 0, 1000, 300))
+
+    widths = [spy.rects[0].width for spy in spies]
+    heights = [spy.rects[0].height for spy in spies]
+    self.assertTrue(all(width == widths[0] for width in widths))
+    self.assertTrue(all(height == heights[0] for height in heights))
+    self.assertGreater(spies[4].rects[0].x, spies[0].rects[0].x)
+    self.assertAlmostEqual(spies[5].rects[0].x - spies[4].rects[0].x, widths[0] + 10, delta=1)
 
 
   def test_toggle_and_value_tiles_keep_enabled_contract(self):
