@@ -3843,6 +3843,7 @@ class HubTile(AetherTile):
     on_click: Callable | None = None,
     bg_color: rl.Color | str | None = None,
     get_status: Callable[[], str] | None = None,
+    title_colors: tuple[rl.Color, ...] | None = None,
   ):
     if bg_color:
       super().__init__(surface_color=bg_color, on_click=on_click)
@@ -3851,7 +3852,8 @@ class HubTile(AetherTile):
     self.get_status = get_status
     self.title = title
     self.desc = desc
-    self.custom_icon_key = icon_key if icon_key in ("sound", "steering", "navigate", "system", "display", "vehicle", "road", "aicar") else None
+    self.custom_icon_key = icon_key if icon_key in ("sound", "steering", "navigate", "system", "display", "vehicle", "road", "aicar", "rave") else None
+    self.title_colors = title_colors
     self._icon = None
     self._font_title = gui_app.font(FontWeight.MEDIUM)
     self._font_desc = gui_app.font(FontWeight.MEDIUM)
@@ -3890,9 +3892,17 @@ class HubTile(AetherTile):
       self._draw_custom_icon(self.custom_icon_key, icon_x, content_top, s, mix_colors(rl.Color(255, 255, 255, 255), accent, 0.08))
       content_top += icon_h + gap
 
-    draw_text_fit_common(self._font_title, title_text,
-                        rl.Vector2(rx + content_pad, content_top),
-                        max_w, title_size, align_center=True, color=rl.WHITE)
+    if self.title_colors and len(self.title_colors) == len(title_text):
+      glyph_widths = [measure_text_cached(self._font_title, glyph, title_size).x for glyph in title_text]
+      title_width = sum(glyph_widths)
+      glyph_x = rx + (rw - title_width) / 2
+      for glyph, glyph_width, glyph_color in zip(title_text, glyph_widths, self.title_colors, strict=True):
+        rl.draw_text_ex(self._font_title, glyph, rl.Vector2(round(glyph_x), round(content_top)), title_size, 0, glyph_color)
+        glyph_x += glyph_width
+    else:
+      draw_text_fit_common(self._font_title, title_text,
+                          rl.Vector2(rx + content_pad, content_top),
+                          max_w, title_size, align_center=True, color=rl.WHITE)
     content_top += title_size
 
     if desc_to_render:

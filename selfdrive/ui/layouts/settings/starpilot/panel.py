@@ -72,6 +72,7 @@ class StarPilotPanelType(IntEnum):
     VEHICLE = 10
     SYSTEM = 12
     NAVIGATION = 13
+    RAVE = 14
 
 
 @dataclass

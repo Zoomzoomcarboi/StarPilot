@@ -134,6 +134,37 @@ def _draw_custom_icon_geometry(key: str, x: float, y: float, s: float, color: rl
     # Perspective base shadow
     draw_ellipse_arc(x_c, y_c + 24.0 * s, 14.0 * s, 4.5 * s, 0.0, 0.0, 360.0, 2.0 * s)
 
+  elif key == "rave":
+    # RAVE: a rear perception viewport feeding a compact, centered vision camera.
+    thick = 2.4 * s
+
+    # Wide tapered rear window / field-of-view outline.
+    rl.draw_line_ex(rl.Vector2(x + 10.0 * s, y + 7.0 * s), rl.Vector2(x + 50.0 * s, y + 7.0 * s), thick, color)
+    rl.draw_line_ex(rl.Vector2(x + 10.0 * s, y + 7.0 * s), rl.Vector2(x + 4.5 * s, y + 27.0 * s), thick, color)
+    rl.draw_line_ex(rl.Vector2(x + 50.0 * s, y + 7.0 * s), rl.Vector2(x + 55.5 * s, y + 27.0 * s), thick, color)
+    rl.draw_line_ex(rl.Vector2(x + 4.5 * s, y + 27.0 * s), rl.Vector2(x + 55.5 * s, y + 27.0 * s), thick, color)
+    rl.draw_circle_v(rl.Vector2(x + 10.0 * s, y + 7.0 * s), thick / 2.0, color)
+    rl.draw_circle_v(rl.Vector2(x + 50.0 * s, y + 7.0 * s), thick / 2.0, color)
+    rl.draw_circle_v(rl.Vector2(x + 4.5 * s, y + 27.0 * s), thick / 2.0, color)
+    rl.draw_circle_v(rl.Vector2(x + 55.5 * s, y + 27.0 * s), thick / 2.0, color)
+
+    # Horizon, perspective lanes, and three large center-lane marks.
+    rl.draw_line_ex(rl.Vector2(x + 13.0 * s, y + 14.0 * s), rl.Vector2(x + 47.0 * s, y + 14.0 * s), 1.8 * s, color)
+    rl.draw_line_ex(rl.Vector2(x + 27.0 * s, y + 14.0 * s), rl.Vector2(x + 15.0 * s, y + 24.5 * s), 1.9 * s, color)
+    rl.draw_line_ex(rl.Vector2(x + 33.0 * s, y + 14.0 * s), rl.Vector2(x + 45.0 * s, y + 24.5 * s), 1.9 * s, color)
+    rl.draw_line_ex(rl.Vector2(x + 30.0 * s, y + 16.0 * s), rl.Vector2(x + 30.0 * s, y + 17.5 * s), 1.8 * s, color)
+    rl.draw_line_ex(rl.Vector2(x + 30.0 * s, y + 19.0 * s), rl.Vector2(x + 30.0 * s, y + 21.0 * s), 2.0 * s, color)
+    rl.draw_line_ex(rl.Vector2(x + 30.0 * s, y + 22.5 * s), rl.Vector2(x + 30.0 * s, y + 25.0 * s), 2.2 * s, color)
+
+    # Compact camera body and dominant lens, aligned to the viewport center.
+    body = rl.Rectangle(x + 14.0 * s, y + 31.0 * s, 32.0 * s, 22.0 * s)
+    rl.draw_rectangle_rounded_lines_ex(body, 0.28, 16, thick, color)
+    rl.draw_line_ex(rl.Vector2(x + 24.0 * s, y + 31.0 * s), rl.Vector2(x + 27.0 * s, y + 27.0 * s), thick, color)
+    rl.draw_line_ex(rl.Vector2(x + 33.0 * s, y + 27.0 * s), rl.Vector2(x + 36.0 * s, y + 31.0 * s), thick, color)
+
+    lens_center = rl.Vector2(x + 30.0 * s, y + 42.0 * s)
+    rl.draw_ring(lens_center, 5.2 * s, 8.0 * s, 0.0, 360.0, 48, color)
+
   elif key == "system":
     # System Settings: Interlocking minimalist gears (Large & Small)
     cx1, cy1 = x + 24.0 * s, y + 24.0 * s
