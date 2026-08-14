@@ -1,10 +1,13 @@
 from copy import deepcopy
 import sys
 from types import SimpleNamespace
+from jeepney import DBusAddress
+from jeepney.low_level import MessageType
 import pytest
 
 from openpilot.starpilot.system.rave_networkd.network_manager import (
-  Adapter, AuthorizationError, NetworkManagerClient, NetworkManagerError, NetworkSnapshot, Profile, _driver_from_sysfs,
+  Adapter, AuthorizationError, NetworkManagerClient, NetworkManagerError, NetworkSnapshot, Profile, ProfileRejectedError,
+  _driver_from_sysfs,
 )
 from openpilot.starpilot.system.rave_networkd.rave_networkd import (
   RAVE_ADDRESS, RETRY_DELAYS, RaveNetworkDaemon, profile_is_exact, profile_settings,
@@ -144,7 +147,7 @@ def test_profile_settings_are_exact_and_mac_is_device_specific():
   settings = profile_settings("u", RTL)
   assert settings["ipv4"]["method"] == ("s", "manual")
   assert settings["ipv4"]["address-data"] == ("aa{sv}", [{"address": ("s", "10.77.0.2"), "prefix": ("u", 24)}])
-  assert settings["ipv4"]["gateway"] == ("s", "")
+  assert "gateway" not in settings["ipv4"]
   assert settings["ipv4"]["never-default"] == ("b", True)
   assert settings["ipv4"]["ignore-auto-dns"] == ("b", True)
   assert settings["ipv4"]["dns"] == ("au", [])
@@ -159,6 +162,16 @@ def test_owned_profile_created_and_uuid_persisted():
   assert d.reconcile(True)["state"] == "connected"
   assert "add" in backend.calls
   assert params.get("RaveNetworkProfileUuid") == backend.active.uuid
+
+
+def test_networkmanager_profile_without_gateway_is_exact_and_not_updated():
+  profile = owned()
+  assert "gateway" not in profile.settings["ipv4"]
+  assert profile_is_exact(profile, AX)
+  backend = FakeBackend([AX], [profile], active=profile)
+  d, _ = daemon(backend, {"RaveNetworkProfileUuid": profile.uuid})
+  assert d.reconcile(False)["state"] == "connected"
+  assert "update" not in backend.calls
 
 
 def test_unrelated_same_name_profile_is_not_touched():
@@ -244,12 +257,29 @@ def test_address_mismatch_and_adapter_disappearance():
 
 
 @pytest.mark.parametrize("error,reason", [(NetworkManagerError(), "networkManagerUnavailable"),
-                                           (AuthorizationError(), "authorizationFailed")])
+                                           (AuthorizationError(), "authorizationFailed"),
+                                           (ProfileRejectedError(), "profileRejected")])
 def test_network_manager_failures_are_sanitized(error, reason):
   backend = FakeBackend([AX])
   backend.error = error
   d, _ = daemon(backend)
   assert d.reconcile(True) == {"state": "networkError", "reason": reason}
+
+
+@pytest.mark.parametrize("error_name,error_type", [
+  ("org.freedesktop.NetworkManager.Settings.Connection.InvalidProperty", ProfileRejectedError),
+  ("org.freedesktop.DBus.Error.AccessDenied", AuthorizationError),
+  ("org.freedesktop.DBus.Error.ServiceUnknown", NetworkManagerError),
+])
+def test_network_manager_dbus_errors_are_classified(error_name, error_type):
+  client = object.__new__(NetworkManagerClient)
+  client._conn = SimpleNamespace(send_and_get_reply=lambda *_args, **_kwargs: SimpleNamespace(
+    header=SimpleNamespace(message_type=MessageType.error, fields={"error_name": error_name}),
+  ))
+  with pytest.raises(error_type) as exc_info:
+    client._call(DBusAddress("/settings", bus_name="org.freedesktop.NetworkManager",
+                             interface="org.freedesktop.NetworkManager.Settings"), "AddConnection")
+  assert type(exc_info.value) is error_type
 
 
 def test_status_writes_only_on_semantic_change_and_dry_run_is_read_only():

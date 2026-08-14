@@ -11,7 +11,9 @@ from typing import Any
 
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
-from openpilot.starpilot.system.rave_networkd.network_manager import Adapter, AuthorizationError, NetworkManagerClient, NetworkManagerError, Profile
+from openpilot.starpilot.system.rave_networkd.network_manager import (
+  Adapter, AuthorizationError, NetworkManagerClient, NetworkManagerError, Profile, ProfileRejectedError,
+)
 
 PROFILE_NAME = "RAVE Ethernet"
 RAVE_ADDRESS = "10.77.0.2/24"
@@ -21,7 +23,7 @@ VALID_STATES = frozenset(("disabled", "adapterMissing", "adapterAmbiguous", "con
 VALID_REASONS = frozenset(("none", "noAdapter", "multipleAdapters", "ownedProfileMissing", "ownershipMismatch",
                            "onroadChangeBlocked", "adapterChanged", "authorizationFailed", "networkManagerUnavailable",
                            "adapterDisappeared", "addressMismatch", "defaultRouteChanged", "primaryConnectionChanged",
-                           "dnsChanged", "ipv6RouteChanged", "activationFailed"))
+                           "dnsChanged", "ipv6RouteChanged", "activationFailed", "profileRejected"))
 
 
 def profile_settings(profile_uuid: str, adapter: Adapter) -> dict[str, dict[str, tuple[str, Any]]]:
@@ -34,7 +36,7 @@ def profile_settings(profile_uuid: str, adapter: Adapter) -> dict[str, dict[str,
     "ipv4": {
       "method": ("s", "manual"),
       "address-data": ("aa{sv}", [{"address": ("s", "10.77.0.2"), "prefix": ("u", 24)}]),
-      "gateway": ("s", ""), "dns": ("au", []), "dns-search": ("as", []),
+      "dns": ("au", []), "dns-search": ("as", []),
       "ignore-auto-dns": ("b", True), "never-default": ("b", True),
     },
     "ipv6": {"method": ("s", "disabled"), "never-default": ("b", True), "ignore-auto-dns": ("b", True)},
@@ -195,6 +197,8 @@ class RaveNetworkDaemon:
       return status("connected", adapter=adapter)
     except AuthorizationError:
       return status("networkError", "authorizationFailed")
+    except ProfileRejectedError:
+      return status("networkError", "profileRejected")
     except NetworkManagerError:
       self.backend = None
       return status("networkError", "networkManagerUnavailable")

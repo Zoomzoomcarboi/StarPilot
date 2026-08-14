@@ -28,6 +28,10 @@ class AuthorizationError(NetworkManagerError):
   pass
 
 
+class ProfileRejectedError(NetworkManagerError):
+  pass
+
+
 @dataclass(frozen=True)
 class Adapter:
   path: str
@@ -99,6 +103,8 @@ class NetworkManagerClient:
       error_name = str(reply.header.fields)
       if "AccessDenied" in error_name or "NotAuthorized" in error_name:
         raise AuthorizationError("authorizationFailed")
+      if "org.freedesktop.NetworkManager.Settings.Connection." in error_name:
+        raise ProfileRejectedError("profileRejected")
       raise NetworkManagerError("dbusError")
     return reply.body
 
