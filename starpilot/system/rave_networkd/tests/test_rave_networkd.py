@@ -10,7 +10,7 @@ from openpilot.starpilot.system.rave_networkd.network_manager import (
   _driver_from_sysfs,
 )
 from openpilot.starpilot.system.rave_networkd.rave_networkd import (
-  RAVE_ADDRESS, RETRY_DELAYS, RaveNetworkDaemon, profile_is_exact, profile_settings,
+  RAVE_ADDRESS, RETRY_DELAYS, VALID_REASONS, RaveNetworkDaemon, profile_is_exact, profile_settings,
 )
 
 # Keep this isolated unit suite independent of the full controls import graph.
@@ -114,6 +114,53 @@ def test_supported_usb_driver_resolution(tmp_path, driver):
   assert _driver_from_sysfs("renamed0", sys_net) == (driver, "0b95", "1790")
 
 
+@pytest.mark.parametrize("driver", ["ax88179_178a", "r8152"])
+def test_supported_usb_ethernet_detected_without_permanent_mac(tmp_path, driver):
+  sys_net = tmp_path / "net"
+  usb = tmp_path / "usb" / "1-1"
+  device = usb / "1-1:1.0"
+  driver_path = tmp_path / "drivers" / driver
+  device.mkdir(parents=True)
+  driver_path.mkdir(parents=True)
+  (usb / "idVendor").write_text("0b95\n")
+  (usb / "idProduct").write_text("1790\n")
+  (sys_net / "any-name").mkdir(parents=True)
+  (sys_net / "any-name" / "device").symlink_to(device, target_is_directory=True)
+  (device / "driver").symlink_to(driver_path, target_is_directory=True)
+
+  client = object.__new__(NetworkManagerClient)
+  client._sys_class_net = sys_net
+  client._nm = object()
+  client._call = lambda *_args: (["/device"],)
+  client._properties = lambda _path, interface: (
+    {"DeviceType": ("u", 1), "Interface": ("s", "any-name")} if interface.endswith(".Device") else {}
+  )
+  assert client.list_adapters() == [Adapter("/device", "any-name", driver, "", "0b95", "1790")]
+
+
+@pytest.mark.parametrize("driver,with_usb_ancestry", [("cdc_ether", True), ("ax88179_178a", False)])
+def test_unsupported_or_non_usb_ethernet_is_ignored(tmp_path, driver, with_usb_ancestry):
+  sys_net = tmp_path / "net"
+  parent = tmp_path / "device"
+  device = parent / "interface"
+  driver_path = tmp_path / "drivers" / driver
+  device.mkdir(parents=True)
+  driver_path.mkdir(parents=True)
+  if with_usb_ancestry:
+    (parent / "idVendor").write_text("1234\n")
+    (parent / "idProduct").write_text("5678\n")
+  (sys_net / "eth7").mkdir(parents=True)
+  (sys_net / "eth7" / "device").symlink_to(device, target_is_directory=True)
+  (device / "driver").symlink_to(driver_path, target_is_directory=True)
+
+  client = object.__new__(NetworkManagerClient)
+  client._sys_class_net = sys_net
+  client._nm = object()
+  client._call = lambda *_args: (["/device"],)
+  client._properties = lambda *_args: {"DeviceType": ("u", 1), "Interface": ("s", "eth7")}
+  assert client.list_adapters() == []
+
+
 def test_unsupported_or_non_ethernet_candidates_are_absent():
   d, _ = daemon(FakeBackend([]))
   assert d.reconcile(True)["state"] == "adapterMissing"
@@ -143,7 +190,7 @@ def test_two_candidates_are_ambiguous_without_mutation():
   assert backend.calls == []
 
 
-def test_profile_settings_are_exact_and_mac_is_device_specific():
+def test_profile_settings_are_exact_and_not_bound_to_mac():
   settings = profile_settings("u", RTL)
   assert settings["ipv4"]["method"] == ("s", "manual")
   assert settings["ipv4"]["address-data"] == ("aa{sv}", [{"address": ("s", "10.77.0.2"), "prefix": ("u", 24)}])
@@ -153,7 +200,7 @@ def test_profile_settings_are_exact_and_mac_is_device_specific():
   assert settings["ipv4"]["dns"] == ("au", [])
   assert settings["ipv6"]["method"] == ("s", "disabled")
   assert settings["connection"]["autoconnect"] == ("b", True)
-  assert settings["802-3-ethernet"]["mac-address"][1] == bytes.fromhex("aabbccddeeff")
+  assert "mac-address" not in settings.get("802-3-ethernet", {})
 
 
 def test_owned_profile_created_and_uuid_persisted():
@@ -218,15 +265,68 @@ def test_existing_owned_profile_reactivates_onroad():
   assert backend.calls.count("activate") == 1
 
 
-def test_replacement_adapter_rebinds_owned_profile_only_offroad():
+def test_supported_replacement_adapter_has_no_hardware_identity_conflict():
   profile = owned(AX)
   backend = FakeBackend([RTL], [profile])
   d, _ = daemon(backend, {"RaveNetworkProfileUuid": profile.uuid})
-  assert d.reconcile(False)["reason"] == "adapterChanged"
+  assert d.reconcile(False)["state"] == "connected"
   assert "update" not in backend.calls
-  assert d.reconcile(True)["state"] == "connected"
-  assert "update" in backend.calls
-  assert backend.active.settings["802-3-ethernet"]["mac-address"][1] == bytes.fromhex("aabbccddeeff")
+
+
+def test_mac_change_between_boots_keeps_owned_profile_exact_and_idempotent():
+  boot_a = Adapter("/ax", "eth0", "ax88179_178a", "00:0e:c6:8e:c2:5e", "0b95", "1790")
+  boot_b = Adapter("/ax", "eth1", "ax88179_178a", "00:0e:c6:8e:2f:64", "0b95", "1790")
+  profile = owned(boot_a)
+  assert profile_is_exact(profile, boot_b)
+  backend = FakeBackend([boot_b], [profile], active=profile)
+  d, _ = daemon(backend, {"RaveNetworkProfileUuid": profile.uuid})
+  assert d.reconcile(False)["state"] == "connected"
+  assert "update" not in backend.calls
+  assert len(backend.profiles) == 1
+
+
+def test_legacy_mac_binding_is_cleaned_from_owned_profile_offroad():
+  boot_a = Adapter("/ax", "eth0", "ax88179_178a", "00:0e:c6:8e:c2:5e", "0b95", "1790")
+  boot_b = Adapter("/ax", "eth1", "ax88179_178a", "00:0e:c6:8e:2f:64", "0b95", "1790")
+  profile = owned(boot_a)
+  profile.settings["802-3-ethernet"] = {
+    "mac-address": ("ay", bytes.fromhex(boot_a.permanent_mac.replace(":", ""))),
+  }
+  assert not profile_is_exact(profile, boot_b)
+
+  backend = FakeBackend([boot_b], [profile], active=profile)
+  d, params = daemon(backend, {"RaveNetworkProfileUuid": profile.uuid})
+  result = d.reconcile(True)
+  assert result == {"state": "connected", "reason": "none", "interface": "eth1",
+                    "driver": "ax88179_178a", "usbId": "0b95:1790"}
+  assert backend.calls.count("update") == 1
+  assert "add" not in backend.calls
+  assert params.get("RaveNetworkProfileUuid") == profile.uuid
+  assert len(backend.profiles) == 1
+  cleaned = backend.profiles[0]
+  assert cleaned.uuid == profile.uuid
+  assert "mac-address" not in cleaned.settings.get("802-3-ethernet", {})
+  assert profile_is_exact(cleaned, boot_b)
+  assert "adapterChanged" not in VALID_REASONS
+
+
+def test_legacy_mac_binding_is_not_cleaned_onroad():
+  profile = owned()
+  profile.settings["802-3-ethernet"] = {"mac-address": ("ay", bytes.fromhex("000ec68ec25e"))}
+  original_settings = deepcopy(profile.settings)
+  backend = FakeBackend([AX], [profile], active=profile)
+  d, params = daemon(backend, {"RaveNetworkProfileUuid": profile.uuid})
+  assert d.reconcile(False)["reason"] == "onroadChangeBlocked"
+  assert "update" not in backend.calls
+  assert backend.profiles == [profile]
+  assert profile.settings == original_settings
+  assert params.get("RaveNetworkProfileUuid") == profile.uuid
+
+
+def test_missing_autoconnect_true_is_semantically_exact():
+  profile = owned()
+  del profile.settings["connection"]["autoconnect"]
+  assert profile_is_exact(profile, AX)
 
 
 @pytest.mark.parametrize("field,changed,reason", [

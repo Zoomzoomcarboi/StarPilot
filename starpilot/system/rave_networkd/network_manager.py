@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -62,26 +61,36 @@ def _variant_value(value: Any, default: Any = None) -> Any:
   return value[1] if isinstance(value, tuple) and len(value) == 2 else default
 
 
-def _driver_from_sysfs(interface: str, sys_class_net: Path = Path("/sys/class/net")) -> tuple[str, str, str]:
+def _device_details_from_sysfs(interface: str, sys_class_net: Path) -> tuple[str, bool, str, str]:
   device = sys_class_net / interface / "device"
   driver_path = device / "driver"
   if not driver_path.exists():
-    return "", "", ""
+    return "", False, "", ""
   try:
     driver = os.path.basename(os.path.realpath(driver_path))
   except OSError:
-    return "", "", ""
+    return "", False, "", ""
+  usb_ancestry = False
   vendor = product = ""
   try:
     current = device.resolve()
     for parent in (current, *current.parents):
       vendor_path, product_path = parent / "idVendor", parent / "idProduct"
-      if vendor_path.is_file() and product_path.is_file():
-        vendor = vendor_path.read_text().strip().lower()
-        product = product_path.read_text().strip().lower()
+      subsystem = parent / "subsystem"
+      if os.path.basename(os.path.realpath(subsystem)) == "usb" or vendor_path.is_file() or product_path.is_file():
+        usb_ancestry = True
+        if vendor_path.is_file():
+          vendor = vendor_path.read_text().strip().lower()
+        if product_path.is_file():
+          product = product_path.read_text().strip().lower()
         break
   except OSError:
     pass
+  return driver, usb_ancestry, vendor, product
+
+
+def _driver_from_sysfs(interface: str, sys_class_net: Path = Path("/sys/class/net")) -> tuple[str, str, str]:
+  driver, _, vendor, product = _device_details_from_sysfs(interface, sys_class_net)
   return driver, vendor, product
 
 
@@ -125,13 +134,11 @@ class NetworkManagerClient:
       if int(_variant_value(props.get("DeviceType"), 0)) != NM_DEVICE_TYPE_ETHERNET:
         continue
       interface = str(_variant_value(props.get("Interface"), ""))
-      driver, vendor, product = _driver_from_sysfs(interface, self._sys_class_net)
-      if driver not in SUPPORTED_DRIVERS or not vendor or not product:
+      driver, usb_ancestry, vendor, product = _device_details_from_sysfs(interface, self._sys_class_net)
+      if driver not in SUPPORTED_DRIVERS or not usb_ancestry:
         continue
       wired_props = self._properties(str(path), NM_WIRED_IFACE)
       permanent_mac = str(_variant_value(wired_props.get("PermHwAddress"), "")).lower()
-      if re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", permanent_mac) is None:
-        continue
       adapters.append(Adapter(str(path), interface, driver, permanent_mac, vendor, product))
     return adapters
 
