@@ -34,6 +34,27 @@ void StarPilotOnroadWindow::updateState(const UIState &s, const StarPilotUIState
   turnSignalLeft = carState.getLeftBlinker();
   turnSignalRight = carState.getRightBlinker();
 
+  RaveWarningState nextRaveWarning;
+  const bool rave_received = fpsm.rcv_frame("raveState") > 0;
+  if (rave_received) {
+    const cereal::RaveState::Reader &raveState = fpsm["raveState"].getRaveState();
+    nextRaveWarning = evaluateRaveWarning({
+      .received = true,
+      .valid = fpsm.valid("raveState"),
+      .now_ns = nanos_since_boot(),
+      .rcv_time_ns = fpsm.rcv_time("raveState"),
+      .packet_age_ms = raveState.getPacketAgeMs(),
+      .enabled = raveState.getEnabled(),
+      .paired = raveState.getPaired(),
+      .connection_state = raveState.getConnectionState(),
+      .health = raveState.getHealth(),
+      .left_threat = raveState.getLeftThreat(),
+      .right_threat = raveState.getRightThreat(),
+    });
+  }
+  const bool rave_visual_changed = nextRaveWarning != raveWarning;
+  raveWarning = nextRaveWarning;
+
   showBlindspot = (blindSpotLeft || blindSpotRight) && starpilot_toggles.value("blind_spot_metrics").toBool();
   showFPS = starpilot_toggles.value("show_fps").toBool();
   showSignal = (turnSignalLeft || turnSignalRight) && starpilot_toggles.value("signal_metrics").toBool();
@@ -95,7 +116,7 @@ void StarPilotOnroadWindow::updateState(const UIState &s, const StarPilotUIState
                           .arg(qRound(avgFPS));
   }
 
-  if (showBlindspot || showSignal || showSteering || showFPS) {
+  if (showBlindspot || showSignal || showSteering || showFPS || rave_visual_changed) {
     update();
   }
 }
@@ -114,9 +135,32 @@ void StarPilotOnroadWindow::paintEvent(QPaintEvent *event) {
     paintTurnSignalBorder(p);
   }
 
+  paintRaveWarnings(p);
+
   if (showFPS) {
     paintFPS(p);
   }
+}
+
+void StarPilotOnroadWindow::paintRaveWarnings(QPainter &p) {
+  constexpr int watch_width = UI_BORDER_SIZE / 2;
+  constexpr int warning_width = UI_BORDER_SIZE;
+  const QColor caution_amber(255, 179, 0, 210);
+  const QColor urgent_red(255, 59, 48, 235);
+
+  const auto paint_side = [&](RaveVisualSeverity severity, bool left) {
+    if (severity == RaveVisualSeverity::NONE) return;
+
+    const int width = severity == RaveVisualSeverity::WARNING ? warning_width : watch_width;
+    const QColor &color = severity == RaveVisualSeverity::WARNING ? urgent_red : caution_amber;
+    const int x = left ? rect.left() : rect.right() - width + 1;
+    p.fillRect(QRect(x, rect.top(), width, rect.height()), color);
+  };
+
+  p.save();
+  paint_side(raveWarning.left, true);
+  paint_side(raveWarning.right, false);
+  p.restore();
 }
 
 void StarPilotOnroadWindow::paintFPS(QPainter &p) {
