@@ -1,14 +1,17 @@
+import inspect
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import socket
 import unittest
 
+import cereal
+
 from openpilot.starpilot.system.rave_linkd.constants import (
-  MAX_RECEIVE_DRAIN, LaneState, MessageType, RaveHealth, ThreatLevel, VehicleFlags,
+  MAX_RECEIVE_DRAIN, LaneState, MessageType, RaveHealth, ThreatLevel,
 )
 from openpilot.starpilot.system.rave_linkd.protocol import (
   Packet, RavePayload, SESSION_ACK_STRUCT, decode_packet, encode_packet, pack_rave_state,
-  unpack_vehicle_state,
+  unpack_rave_state,
 )
 from openpilot.starpilot.system.rave_linkd.rave_linkd import RaveLinkCore, RaveLinkDaemon
 from openpilot.tools.rave.rave_sim import PiEndpoint
@@ -98,26 +101,7 @@ class TestDaemonCore(unittest.TestCase):
         self.assertEqual((self.core.state.left_lane, self.core.state.right_lane), ("unknown", "unknown"))
         self.assertEqual((self.core.state.left_threat, self.core.state.right_threat), ("none", "none"))
 
-  def test_vehicle_mapping_and_no_steering_torque(self):
-    establish(self.core)
-    car_state = SimpleNamespace(vEgo=10.0, aEgo=-1.0, steeringAngleDeg=2.0, steeringRateDeg=3.0,
-      steeringPressed=True, leftBlinker=True, rightBlinker=False, brakePressed=False,
-      gearShifter="drive", standstill=False, leftBlindspot=True, rightBlindspot=False,
-      canValid=True, canTimeout=False, steeringTorque=9999.0)
-    encoded = self.core.vehicle_packet(car_state, 10)
-    packet = decode_packet(encoded, self.core.comma_to_rave)
-    car_state.steeringTorque = -999999.0
-    second = decode_packet(self.core.vehicle_packet(car_state, 11), self.core.comma_to_rave)
-    state = unpack_vehicle_state(packet.payload)
-    self.assertEqual((state.v_ego, state.a_ego, state.gear), (10.0, -1.0, 4))
-    self.assertTrue(state.flags & VehicleFlags.LEFT_BLINKER)
-    self.assertTrue(state.flags & VehicleFlags.LEFT_BLINDSPOT)
-    self.assertEqual(packet.payload, second.payload)
-    self.assertEqual(len(packet.payload), 20)
-
-  def test_no_vehicle_before_session_disable_and_forget_clear(self):
-    car_state = SimpleNamespace()
-    self.assertIsNone(self.core.vehicle_packet(car_state, 0))
+  def test_disable_and_forget_clear(self):
     establish(self.core)
     self.core.handle_runtime(rave_packet(self.core, 0), 1)
     self.core.configure(False)
@@ -197,7 +181,6 @@ class TestDaemonCore(unittest.TestCase):
     self.assertIsNone(self.core.make_challenge(5))
     self.assertFalse(self.core.handle_runtime(encode_packet(old_ack, self.core.rave_to_comma), 5))
     self.assertFalse(self.core.handle_runtime(rave_packet(self.core, 1), 5))
-    self.assertIsNone(self.core.vehicle_packet(SimpleNamespace(), 5))
     self.assertEqual(self.core.state.connection, "pairing")
     self.core.cancel_pairing()
     self.assertIsNotNone(self.core.make_challenge(6))
@@ -209,6 +192,9 @@ class FakeParams:
 
   def get_bool(self, key):
     return bool(self.values.get(key, False))
+
+  def get(self, key):
+    return self.values.get(key)
 
   def remove(self, key):
     self.values.pop(key, None)
@@ -234,9 +220,26 @@ class TestDaemonLifecycle(unittest.TestCase):
     daemon.params_memory = FakeParams()
     daemon.runtime_socket = daemon.pairing_socket = None
     daemon.next_network_retry_ns = 0
-    daemon.next_vehicle_ns = 0
     daemon.cloudlog = SimpleNamespace(warning=lambda *_args: None)
     return daemon
+
+  def test_construction_has_no_cereal_subscription(self):
+    params = [FakeParams(), FakeParams()]
+    fake_messaging = SimpleNamespace(SubMaster=Mock(), PubMaster=Mock(return_value=SimpleNamespace()))
+    with patch("openpilot.starpilot.system.rave_linkd.rave_linkd.Params", side_effect=params), \
+         patch.object(cereal, "messaging", fake_messaging, create=True):
+      daemon = RaveLinkDaemon()
+    fake_messaging.SubMaster.assert_not_called()
+    self.assertFalse(hasattr(daemon, "sm"))
+
+  def test_production_source_has_no_vehicle_runtime_path(self):
+    source = inspect.getsource(__import__(
+      "openpilot.starpilot.system.rave_linkd.rave_linkd", fromlist=["RaveLinkDaemon"]))
+    for forbidden in ("SubMaster", "carState", "sm.update", "_send_vehicle_if_due",
+                      "next_vehicle_ns", "VEHICLE_PERIOD_NS", "VEHICLE_STATE_HZ", "vehicle_packet",
+                      "vehicle_packets", "pack_vehicle_state", "VehicleState", "MessageType.VEHICLE_STATE"):
+      with self.subTest(forbidden=forbidden):
+        self.assertNotIn(forbidden, source)
 
   def test_socket_factory_binds_only_dedicated_address(self):
     calls = []
@@ -317,60 +320,46 @@ class TestDaemonLifecycle(unittest.TestCase):
     self.assertIsNone(daemon.pairing_socket)
     self.assertEqual(daemon.next_network_retry_ns, 1_000_000_044)
 
-  def test_absolute_vehicle_deadline_has_no_drift_or_catchup(self):
-    deadline = 0
-    sends = 0
-    for now_ns in range(0, 1_000_000_000, 1_000_000):
-      due, deadline = RaveLinkDaemon._advance_deadline(now_ns, deadline, 20_000_000)
-      sends += due
-    self.assertEqual(sends, 50)
-    self.assertEqual(deadline, 1_000_000_000)
-
-    deadline = 0
-    due_times = []
-    for now_ns in (0, 7_000_000, 23_000_000, 41_000_000, 67_000_000, 82_000_000, 101_000_000):
-      due, deadline = RaveLinkDaemon._advance_deadline(now_ns, deadline, 20_000_000)
-      if due:
-        due_times.append(now_ns)
-      self.assertEqual(deadline % 20_000_000, 0)
-    self.assertEqual(len(due_times), 6)
-    due, deadline = RaveLinkDaemon._advance_deadline(1_000_000_000, deadline, 20_000_000)
-    self.assertTrue(due)
-    self.assertEqual(deadline, 1_020_000_000)
-
-  def test_vehicle_state_is_refreshed_after_wait_and_sent_once(self):
-    daemon = self.make_daemon()
-    establish(daemon.core)
-    newest = SimpleNamespace(vEgo=42.0, aEgo=0.0, steeringAngleDeg=0.0, steeringRateDeg=0.0,
-      steeringPressed=False, leftBlinker=False, rightBlinker=False, brakePressed=False,
-      gearShifter="drive", standstill=False, leftBlindspot=False, rightBlindspot=False,
-      canValid=True, canTimeout=False)
-
-    class FakeSubMaster:
-      valid = {"carState": True}
-      def __init__(self): self.updates = 0
-      def update(self, _timeout): self.updates += 1
-      def __getitem__(self, _key): return newest
-
-    class SendSocket(FakeBoundSocket):
-      def __init__(self): super().__init__(); self.sent = []
-      def sendto(self, data, destination): self.sent.append((data, destination))
-
-    daemon.sm = FakeSubMaster()
-    daemon.runtime_socket = SendSocket()
-    self.assertTrue(daemon._send_vehicle_if_due(100, True))
-    self.assertEqual(daemon.sm.updates, 1)
-    self.assertEqual(len(daemon.runtime_socket.sent), 1)
-    packet = decode_packet(daemon.runtime_socket.sent[0][0], daemon.core.comma_to_rave)
-    self.assertEqual(unpack_vehicle_state(packet.payload).v_ego, 42.0)
-    self.assertFalse(daemon._send_vehicle_if_due(101, True))
-    self.assertEqual(len(daemon.runtime_socket.sent), 1)
-
   def test_startup_clears_only_rave_commands(self):
     daemon = self.make_daemon()
-    daemon.params_memory = FakeParams({key: True for key in RaveLinkDaemon.TRANSIENT_COMMANDS} | {"UnrelatedCommand": True})
+    credentials = {"RavePeerId": "pi-id", "RavePeerName": "RAVE-Pi5", "RavePairingKey": MASTER}
+    daemon.params = FakeParams(credentials)
+    daemon.params_memory = FakeParams(dict.fromkeys(RaveLinkDaemon.TRANSIENT_COMMANDS, True) | {"UnrelatedCommand": True})
     daemon._clear_transient_commands()
     self.assertEqual(daemon.params_memory.values, {"UnrelatedCommand": True})
+    self.assertEqual(daemon.params.values, credentials)
+
+  def test_confirmed_pairing_persists_reloads_and_only_forget_deletes_credentials(self):
+    daemon = self.make_daemon(paired=False)
+    daemon.core.start_pairing(0)
+    offer = PiEndpoint("pi-id", "RAVE-Pi5")
+    probe = Packet(MessageType.PAIR_PROBE, bytes(16), bytes(16), 0, 1, daemon.core.pairing.probe_payload())
+    offered = offer.handle_pairing(encode_packet(probe, None), 1)
+    daemon._handle_pairing(offered, 2)
+    install_payload = daemon.core.pairing.confirm_payload()
+    install = Packet(MessageType.PAIR_KEY_INSTALL, bytes(16), bytes(16), 0, 3, install_payload)
+    confirmed = offer.handle_pairing(encode_packet(install, None), 3)
+    daemon.pairing_socket = SimpleNamespace(sendto=lambda *_args: None)
+    daemon._handle_pairing(confirmed, 4)
+
+    credentials = {key: daemon.params.values[key] for key in ("RavePeerId", "RavePeerName", "RavePairingKey")}
+    self.assertEqual(credentials, {"RavePeerId": "pi-id", "RavePeerName": "RAVE-Pi5",
+                                   "RavePairingKey": daemon.core.master_key})
+    restarted = self.make_daemon(paired=False)
+    restarted.params = daemon.params
+    restarted._load_config()
+    self.assertTrue(restarted.core.paired)
+    self.assertEqual((restarted.core.peer_id, restarted.core.peer_name, restarted.core.master_key),
+                     ("pi-id", "RAVE-Pi5", credentials["RavePairingKey"]))
+
+    for enabled, offroad, onroad in ((False, True, False), (True, True, False), (True, False, True)):
+      restarted.params.values.update(RaveEnabled=enabled, IsOffroad=offroad, IsOnroad=onroad)
+      restarted._load_config()
+      self.assertEqual({key: restarted.params.values[key] for key in credentials}, credentials)
+
+    restarted.params_memory.values["RaveForgetRequest"] = True
+    restarted._consume_commands(5)
+    self.assertTrue(all(key not in restarted.params.values for key in credentials))
 
   def test_pairing_cancelled_if_offroad_state_changes_and_confirm_is_ignored(self):
     daemon = self.make_daemon(paired=False)
@@ -389,7 +378,7 @@ class TestDaemonLifecycle(unittest.TestCase):
     daemon = self.make_daemon(paired=False)
     daemon.core.start_pairing(0)
     daemon.core.pairing.candidate = SimpleNamespace(device_name="Candidate-Pi")
-    daemon.vehicle_tx_hz = daemon.rave_rx_hz = 0.0
+    daemon.rave_rx_hz = 7.5
     daemon.last_published_state = None
 
     class FakeState(SimpleNamespace):
@@ -402,6 +391,10 @@ class TestDaemonLifecycle(unittest.TestCase):
     self.assertEqual(sent, [("raveState", message)])
     self.assertEqual(message.raveState.connectionState, "pairing")
     self.assertEqual(message.raveState.peerName, "Candidate-Pi")
+    self.assertEqual(message.raveState.vehicleStateTxHz, 0.0)
+    published = repr(vars(message.raveState))
+    self.assertNotIn(MASTER.hex(), published)
+    self.assertNotIn(repr(MASTER), published)
     daemon.core.cancel_pairing()
     daemon.core.peer_name = "Persisted-Pi"
     daemon._publish(124)
@@ -445,6 +438,25 @@ class TestDaemonLifecycle(unittest.TestCase):
     paired = self.make_daemon(paired=True)
     paired.params.values = {"IsOffroad": False, "IsOnroad": True}
     self.assertIsNotNone(paired.core.make_challenge(100))
+
+  def test_simulator_threat_is_operator_controlled_without_vehicle_state(self):
+    core = RaveLinkCore(now_ns=0)
+    core.configure(True, "pi-id", "RAVE-Pi5", MASTER)
+    pi = PiEndpoint("pi-id", "RAVE-Pi5", MASTER, b"p" * 16)
+    self.assertTrue(core.handle_runtime(pi.handle_runtime(core.make_challenge(1), 1), 1))
+    states = (
+      (LaneState.OCCUPIED, ThreatLevel.WATCH),
+      (LaneState.OCCUPIED, ThreatLevel.WARNING),
+      (LaneState.CLEAR, ThreatLevel.NONE),
+    )
+    for sequence, (lane, threat) in enumerate(states):
+      with self.subTest(lane=int(lane), threat=int(threat)):
+        pi.left_lane = lane
+        pi.left_threat = threat
+        packet = decode_packet(pi.rave_state_packet(sequence + 2), core.rave_to_comma)
+        state = unpack_rave_state(packet.payload)
+        self.assertEqual(state.left_lane, lane)
+        self.assertEqual(state.left_threat, threat)
 
 
 if __name__ == "__main__":

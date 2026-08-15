@@ -10,34 +10,17 @@ from openpilot.starpilot.system.rave_linkd.constants import (
   COMMA_ADDRESS, LaneState, MAX_DATAGRAM_SIZE, MAX_RECEIVE_DRAIN, MessageType,
   PAIRING_PORT, PAIRING_PROBE_HZ, PAIRING_WINDOW_NS, RAVE_ADDRESS, RUNTIME_PORT,
   RaveHealth, SESSION_CHALLENGE_HZ, STALE_NS, STATUS_HEARTBEAT_HZ, ThreatLevel,
-  VEHICLE_STATE_HZ, WAITING_NS, VehicleFlags, WireGear, ZERO_SESSION,
+  WAITING_NS, ZERO_SESSION,
 )
 from openpilot.starpilot.system.rave_linkd.pairing import CommaPairing
 from openpilot.starpilot.system.rave_linkd.protocol import (
-  AuthenticationError, Packet, ProtocolError, VehicleState,
-  decode_packet, derive_directional_keys, encode_packet, pack_vehicle_state,
-  unpack_rave_state,
+  AuthenticationError, Packet, ProtocolError, decode_packet, derive_directional_keys,
+  encode_packet, unpack_rave_state,
 )
 from openpilot.starpilot.system.rave_linkd.session import CommaSession, SequenceError
 
 RUNTIME_DESTINATION = (RAVE_ADDRESS, RUNTIME_PORT)
 PAIRING_DESTINATION = (RAVE_ADDRESS, PAIRING_PORT)
-VEHICLE_PERIOD_NS = int(1e9 / VEHICLE_STATE_HZ)
-
-GEAR_MAP = {
-  "unknown": WireGear.UNKNOWN,
-  "park": WireGear.PARK,
-  "reverse": WireGear.REVERSE,
-  "neutral": WireGear.NEUTRAL,
-  "drive": WireGear.DRIVE,
-  "sport": WireGear.SPORT,
-  "low": WireGear.LOW,
-  "brake": WireGear.BRAKE,
-  "eco": WireGear.ECO,
-  "manumatic": WireGear.MANUAL,
-}
-
-
 @dataclass(frozen=True)
 class LinkState:
   connection: str = "disabled"
@@ -69,7 +52,6 @@ class RaveLinkCore:
     self.malformed = 0
     self.peer_restarts = 0
     self.rave_packets = 0
-    self.vehicle_packets = 0
     self.started_ns = now_ns
 
   @property
@@ -183,34 +165,6 @@ class RaveLinkCore:
       self.state = LinkState(connection="waiting")
     return old != self.state
 
-  def vehicle_packet(self, car_state, now_ns: int) -> bytes | None:
-    if self.pairing.active or not self.session.established or self.session.remote_session is None or self.comma_to_rave is None:
-      return None
-    flags = VehicleFlags(0)
-    for condition, flag in (
-      (car_state.steeringPressed, VehicleFlags.STEERING_PRESSED),
-      (car_state.leftBlinker, VehicleFlags.LEFT_BLINKER),
-      (car_state.rightBlinker, VehicleFlags.RIGHT_BLINKER),
-      (car_state.brakePressed, VehicleFlags.BRAKE_PRESSED),
-      (car_state.standstill, VehicleFlags.STANDSTILL),
-      (car_state.leftBlindspot, VehicleFlags.LEFT_BLINDSPOT),
-      (car_state.rightBlindspot, VehicleFlags.RIGHT_BLINDSPOT),
-      (car_state.canValid, VehicleFlags.CAN_VALID),
-      (car_state.canTimeout, VehicleFlags.CAN_TIMEOUT),
-    ):
-      if condition:
-        flags |= flag
-    gear_name = str(car_state.gearShifter).rsplit(".", 1)[-1]
-    payload = pack_vehicle_state(VehicleState(
-      car_state.vEgo, car_state.aEgo, car_state.steeringAngleDeg, car_state.steeringRateDeg,
-      int(flags), int(GEAR_MAP.get(gear_name, WireGear.UNKNOWN)),
-    ))
-    packet = Packet(MessageType.VEHICLE_STATE, self.session.local_session, self.session.remote_session,
-                    self.session.next_tx_sequence(), now_ns, payload)
-    self.vehicle_packets += 1
-    return encode_packet(packet, self.comma_to_rave)
-
-
 class RaveLinkDaemon:
   TRANSIENT_COMMANDS = ("RavePairRequest", "RavePairConfirm", "RavePairCancel", "RaveForgetRequest")
 
@@ -221,19 +175,17 @@ class RaveLinkDaemon:
     self.messaging = messaging
     self.params = Params()
     self.params_memory = Params(memory=True)
-    self.sm = messaging.SubMaster(["carState"])
     self.pm = messaging.PubMaster(["raveState"])
     self.core = RaveLinkCore()
     self._socket_factory = socket_factory or self._make_socket
     self.runtime_socket: socket.socket | None = None
     self.pairing_socket: socket.socket | None = None
     self.next_network_retry_ns = 0
-    self.next_vehicle_ns = 0
     self.last_status_ns = self.last_probe_ns = self.last_challenge_ns = 0
     self.last_command_ns = self.last_config_ns = self.last_metrics_ns = 0
-    self.last_metric_vehicle_packets = self.last_metric_rave_packets = 0
+    self.last_metric_rave_packets = 0
     self.last_published_state: LinkState | None = None
-    self.vehicle_tx_hz = self.rave_rx_hz = 0.0
+    self.rave_rx_hz = 0.0
     self._clear_transient_commands()
     self._load_config()
 
@@ -300,15 +252,6 @@ class RaveLinkDaemon:
     except OSError:
       self._network_unavailable(now_ns)
       return []
-
-  @staticmethod
-  def _advance_deadline(now_ns: int, deadline_ns: int, period_ns: int) -> tuple[bool, int]:
-    if deadline_ns == 0:
-      deadline_ns = now_ns
-    if now_ns < deadline_ns:
-      return False, deadline_ns
-    elapsed_periods = (now_ns - deadline_ns) // period_ns
-    return True, deadline_ns + (elapsed_periods + 1) * period_ns
 
   def _pairing_allowed(self) -> bool:
     return self.params.get_bool("IsOffroad") and not self.params.get_bool("IsOnroad")
@@ -409,7 +352,7 @@ class RaveLinkDaemon:
     state.reason = s.reason
     state.packetAgeMs = min(65535, 65535 if self.core.last_rave_state_ns is None else
                             (now_ns - self.core.last_rave_state_ns) // 1_000_000)
-    state.vehicleStateTxHz = self.vehicle_tx_hz
+    state.vehicleStateTxHz = 0.0
     state.raveStateRxHz = self.rave_rx_hz
     state.staleCount = self.core.stale_count
     state.authFailureCount = self.core.auth_failures
@@ -418,17 +361,6 @@ class RaveLinkDaemon:
     self.pm.send("raveState", msg)
     self.last_status_ns = now_ns
     self.last_published_state = s
-
-  def _send_vehicle_if_due(self, now_ns: int, network_ready: bool) -> bool:
-    due, self.next_vehicle_ns = self._advance_deadline(now_ns, self.next_vehicle_ns, VEHICLE_PERIOD_NS)
-    if not network_ready or not due:
-      return False
-    # Refresh after the network wait so the packet uses the newest carState.
-    self.sm.update(0)
-    if not self.sm.valid.get("carState", False):
-      return False
-    packet = self.core.vehicle_packet(self.sm["carState"], now_ns)
-    return packet is not None and self._sendto(self.runtime_socket, packet, RUNTIME_DESTINATION, now_ns)
 
   def run(self) -> None:
     while True:
@@ -467,15 +399,11 @@ class RaveLinkDaemon:
         if challenge is not None:
           self._sendto(self.runtime_socket, challenge, RUNTIME_DESTINATION, now_ns)
         self.last_challenge_ns = now_ns
-      self._send_vehicle_if_due(now_ns, network_ready)
-
       semantic_changed = self.core.update_freshness(now_ns)
       if now_ns - self.last_metrics_ns >= 1_000_000_000:
         if self.last_metrics_ns:
           elapsed_s = (now_ns - self.last_metrics_ns) / 1e9
-          self.vehicle_tx_hz = (self.core.vehicle_packets - self.last_metric_vehicle_packets) / elapsed_s
           self.rave_rx_hz = (self.core.rave_packets - self.last_metric_rave_packets) / elapsed_s
-        self.last_metric_vehicle_packets = self.core.vehicle_packets
         self.last_metric_rave_packets = self.core.rave_packets
         self.last_metrics_ns = now_ns
       heartbeat_hz = STATUS_HEARTBEAT_HZ if self.core.enabled else 1.0

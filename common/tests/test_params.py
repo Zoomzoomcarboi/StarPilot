@@ -77,6 +77,19 @@ class TestParams:
     self.params.put("RavePairingKey", key)
     assert self.params.get("RavePairingKey") == key
 
+  def test_rave_peer_credentials_survive_lifecycle_clears(self):
+    credentials = {
+      "RavePeerId": "pi-id",
+      "RavePeerName": "RAVE-Pi5",
+      "RavePairingKey": bytes(range(32)),
+    }
+    for key, value in credentials.items():
+      self.params.put(key, value)
+    for flag in (ParamKeyFlag.CLEAR_ON_MANAGER_START, ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION,
+                 ParamKeyFlag.CLEAR_ON_OFFROAD_TRANSITION):
+      self.params.clear_all(flag)
+      assert {key: self.params.get(key) for key in credentials} == credentials
+
   def test_rave_network_profile_ownership_and_status_params(self):
     profile_uuid = str(uuid.uuid4())
     self.params.put("RaveNetworkProfileUuid", profile_uuid)

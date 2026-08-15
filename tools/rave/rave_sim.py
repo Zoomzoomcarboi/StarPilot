@@ -15,18 +15,15 @@ import time
 
 from openpilot.starpilot.system.rave_linkd.constants import (
   COMMA_ADDRESS, LaneState, MessageType, PAIRING_PORT, RAVE_ADDRESS, RUNTIME_PORT,
-  RaveHealth, ThreatLevel, VehicleFlags, ZERO_SESSION,
+  RaveHealth, ThreatLevel, ZERO_SESSION,
 )
 from openpilot.starpilot.system.rave_linkd.pairing import (
   PairOffer, key_confirm_payload, pack_offer, unpack_key_install, unpack_probe, validate_complete,
 )
 from openpilot.starpilot.system.rave_linkd.protocol import (
   AuthenticationError, CHALLENGE_STRUCT, Packet, ProtocolError, RavePayload, decode_packet, derive_directional_keys,
-  encode_packet, pack_rave_state, unpack_vehicle_state,
+  encode_packet, pack_rave_state,
 )
-from openpilot.starpilot.system.rave_linkd.session import SequenceError, SequenceTracker
-
-
 class PiEndpoint:
   def __init__(self, device_id: str, device_name: str, master_key: bytes | None = None,
                pi_session: bytes | None = None):
@@ -39,10 +36,10 @@ class PiEndpoint:
     self.comma_session: bytes | None = None
     self.comma_to_rave: bytes | None = None
     self.rave_to_comma: bytes | None = None
-    self.rx_sequence = SequenceTracker()
     self.tx_sequence = 0
-    self.last_vehicle = None
     self.last_valid_packet: bytes | None = None
+    self.left_lane = LaneState.OCCUPIED
+    self.left_threat = ThreatLevel.WATCH
     if master_key is not None:
       self._activate_key(master_key)
 
@@ -93,25 +90,20 @@ class PiEndpoint:
     if packet.message_type == MessageType.SESSION_CHALLENGE:
       challenge = CHALLENGE_STRUCT.unpack(packet.payload)[0]
       self.comma_session = packet.sender_session
-      self.rx_sequence = SequenceTracker()
       ack = Packet(MessageType.SESSION_ACK, self.pi_session, self.comma_session, 0, now_ns, challenge)
       return encode_packet(ack, self.rave_to_comma)
-    if packet.message_type == MessageType.VEHICLE_STATE and self.comma_session is not None:
-      if packet.sender_session != self.comma_session or packet.peer_session != self.pi_session:
-        raise SequenceError("vehicle packet session mismatch")
-      self.rx_sequence.accept(packet.sequence)
-      self.last_vehicle = unpack_vehicle_state(packet.payload)
     return None
 
-  def rave_state_packet(self, now_ns: int, left_occupied: bool = True) -> bytes | None:
+  def rave_state_packet(self, now_ns: int, left_occupied: bool | None = None) -> bytes | None:
     if self.comma_session is None or self.rave_to_comma is None:
       return None
-    left_intent = bool(self.last_vehicle and self.last_vehicle.flags & VehicleFlags.LEFT_BLINKER)
+    left_lane = self.left_lane if left_occupied is None else LaneState.OCCUPIED if left_occupied else LaneState.CLEAR
+    left_threat = self.left_threat if left_lane == LaneState.OCCUPIED else ThreatLevel.NONE
     payload = RavePayload(
       RaveHealth.OK,
-      LaneState.OCCUPIED if left_occupied else LaneState.CLEAR,
+      left_lane,
       LaneState.CLEAR,
-      ThreatLevel.WARNING if left_occupied and left_intent else ThreatLevel.WATCH if left_occupied else ThreatLevel.NONE,
+      left_threat,
       ThreatLevel.NONE,
     )
     packet = Packet(MessageType.RAVE_STATE, self.pi_session, self.comma_session,
@@ -123,7 +115,6 @@ class PiEndpoint:
   def restart(self) -> None:
     self.pi_session = secrets.token_bytes(16)
     self.comma_session = None
-    self.rx_sequence = SequenceTracker()
     self.tx_sequence = 0
 
 
@@ -178,7 +169,7 @@ def main() -> None:
     sock.bind((args.bind, port))
 
   print("RAVE simulator ready; synthetic LEFT LANE OCCUPIED")
-  print("Commands: pause, resume, restart, invalid-hmac, malformed, duplicate, out-of-order, reset-sequence, old-replay")
+  print("Commands: watch, warning, clear, pause, resume, restart, invalid-hmac, malformed, duplicate, out-of-order, reset-sequence, old-replay")
   last_state_ns = 0
   paused = False
   old_session_packet = None
@@ -194,7 +185,16 @@ def main() -> None:
           monitor_stdin = False
           continue
         command = line.strip().lower()
-        if command == "pause":
+        if command == "watch":
+          endpoint.left_lane = LaneState.OCCUPIED
+          endpoint.left_threat = ThreatLevel.WATCH
+        elif command == "warning":
+          endpoint.left_lane = LaneState.OCCUPIED
+          endpoint.left_threat = ThreatLevel.WARNING
+        elif command == "clear":
+          endpoint.left_lane = LaneState.CLEAR
+          endpoint.left_threat = ThreatLevel.NONE
+        elif command == "pause":
           paused = True
         elif command == "resume":
           paused = False
@@ -223,16 +223,13 @@ def main() -> None:
         response = process_endpoint_packet(endpoint, data, now_ns, sock is pairing, args.key_file)
         if response is not None:
           sock.sendto(response, (args.comma, PAIRING_PORT if sock is pairing else RUNTIME_PORT))
-      except (AuthenticationError, ProtocolError, SequenceError, ValueError) as e:
+      except (AuthenticationError, ProtocolError, ValueError) as e:
         print(f"Dropped packet: {type(e).__name__}")
     if not paused and now_ns - last_state_ns >= 100_000_000:
       state = endpoint.rave_state_packet(now_ns)
       if state is not None:
         runtime.sendto(state, (args.comma, RUNTIME_PORT))
-        if endpoint.last_vehicle and endpoint.last_vehicle.flags & VehicleFlags.LEFT_BLINKER:
-          print("LEFT OCCUPIED + LEFT TURN INTENT = LEFT WARNING")
-        else:
-          print("LEFT OCCUPIED / WATCH — Turn on the left turn signal")
+        print(f"LEFT {endpoint.left_lane.name} / {endpoint.left_threat.name}")
       last_state_ns = now_ns
 
 
