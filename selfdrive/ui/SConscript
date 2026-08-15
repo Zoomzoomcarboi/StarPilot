@@ -1,5 +1,6 @@
 import json
 import os
+from SCons.Script import COMMAND_LINE_TARGETS
 Import('env', 'qt_env', 'arch', 'common', 'messaging', 'visionipc', 'transformations')
 
 base_libs = [common, messaging, visionipc, transformations,
@@ -89,6 +90,12 @@ asset_obj = qt_env.Object("assets", assets)
 
 # build main UI
 qt_env.Program("ui", qt_src + [asset_obj], LIBS=qt_libs)
+if 'selfdrive/ui/tests/test_rave_warning' in COMMAND_LINE_TARGETS:
+  env.Program(
+    'tests/test_rave_warning',
+    ['#common/tests/test_runner.cc', 'tests/test_rave_warning.cc'],
+    LIBS=base_libs,
+  )
 if GetOption('extras'):
   qt_src.remove("main.cc")  # replaced by test_runner
   qt_env.Program('tests/test_translations', [asset_obj, 'tests/test_runner.cc', 'tests/test_translations.cc'] + qt_src, LIBS=qt_libs)

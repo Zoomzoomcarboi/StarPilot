@@ -78,7 +78,7 @@ StarPilotUIState::StarPilotUIState(QObject *parent) : QObject(parent) {
   sm = std::make_unique<SubMaster, const std::initializer_list<const char *>>({
     "carControl", "deviceState", "starpilotCarState", "starpilotDeviceState",
     "starpilotPlan", "starpilotRadarState", "starpilotSelfdriveState", "liveDelay",
-    "liveParameters", "liveTorqueParameters", "liveTracks", "mapdExtendedOut", "mapdOut", "selfdriveState"
+    "liveParameters", "liveTorqueParameters", "liveTracks", "mapdExtendedOut", "mapdOut", "raveState", "selfdriveState"
   });
 
   // Provide sane local defaults until starpilotPlan publishes real toggles.

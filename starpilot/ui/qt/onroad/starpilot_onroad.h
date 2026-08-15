@@ -1,6 +1,7 @@
 #pragma once
 
 #include "selfdrive/ui/qt/onroad/annotated_camera.h"
+#include "starpilot/ui/qt/onroad/rave_warning.h"
 
 class StarPilotOnroadWindow : public QWidget {
   Q_OBJECT
@@ -21,6 +22,7 @@ public:
 private:
   void paintEvent(QPaintEvent *event);
   void paintFPS(QPainter &p);
+  void paintRaveWarnings(QPainter &p);
   void paintSteeringTorqueBorder(QPainter &p);
   void paintTurnSignalBorder(QPainter &p);
   void resizeEvent(QResizeEvent *event);
@@ -34,6 +36,8 @@ private:
   bool showSteering;
   bool turnSignalLeft;
   bool turnSignalRight;
+
+  RaveWarningState raveWarning;
 
   float smoothedSteer;
   float torque;
