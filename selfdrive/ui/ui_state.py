@@ -73,7 +73,13 @@ class UIState:
         "liveTracks",
         "liveDelay",
         "liveTorqueParameters",
-      ]
+        "raveState",
+      ],
+      # RAVE has its own explicit 275 ms fail-dark eligibility contract. Never
+      # make the optional rear-awareness link part of generic UI health checks.
+      ignore_alive=["raveState"],
+      ignore_avg_freq=["raveState"],
+      ignore_valid=["raveState"],
     )
 
     self.prime_state = PrimeState()

@@ -2,6 +2,7 @@ import pyray as rl
 from msgq.visionipc import VisionStreamType
 from openpilot.selfdrive.ui.onroad.augmented_road_view import AugmentedRoadView
 from openpilot.selfdrive.ui.onroad.starpilot.starpilot_border import render_behind, render_overlay, render_background_effects
+from openpilot.selfdrive.ui.onroad.starpilot.rave_warning import render_rave_warnings
 from openpilot.selfdrive.ui.onroad.starpilot.path import render_adjacent_lanes, render_path_edges
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.onroad.starpilot.torque_bar import TorqueBar
@@ -106,6 +107,9 @@ class StarPilotOnroadView(AugmentedRoadView):
     border_rect = rl.Rectangle(rect.x + border_width, rect.y + border_width,
                                 rect.width - 2 * border_width, rect.height - 2 * border_width)
     render_overlay(border_rect, border_width)
+    # Full openpilot/StarPilot alerts take precedence over advisory RAVE visuals.
+    if not self._full_alert_showing():
+      render_rave_warnings(rect, border_width, ui_state.sm)
 
   def _render_slc(self):
     if self._full_alert_showing():
