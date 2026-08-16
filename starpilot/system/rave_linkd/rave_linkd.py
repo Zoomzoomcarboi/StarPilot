@@ -413,6 +413,7 @@ class RaveLinkDaemon:
 
 
 def main() -> None:
+  sm = messaging.SubMaster(["carState"])
   RaveLinkDaemon().run()
 
 
