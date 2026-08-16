@@ -26,6 +26,12 @@ class BorderEffect:
   name: str = ""
 
 
+@dataclass(frozen=True)
+class NativeSideWarningVisibility:
+  left: bool = False
+  right: bool = False
+
+
 _GLOW_MAX_ALPHA = 200
 _GLOW_BASE_INTENSITY = 0.70
 _GLOW_SPAN = 2.5
@@ -44,6 +50,29 @@ _last_was_active = False
 _activation_start = 0.0
 _fade_out_start = 0.0
 _last_state = None
+
+
+def draw_curved_side_warning(rect: rl.Rectangle, color: rl.Color, left: bool,
+                             clip_width: float | None = None) -> None:
+  """Paint one side with StarPilot's native rounded-border geometry."""
+  width = rect.width / 2.0 if clip_width is None else clip_width
+  clip_x = rect.x if left else rect.x + rect.width - width
+  rl.begin_scissor_mode(int(round(clip_x)), int(round(rect.y)),
+                        int(round(width)), int(round(rect.height)))
+  rl.draw_rectangle_rounded(rect, 0.12, 10, color)
+  rl.end_scissor_mode()
+
+
+def native_side_warning_color(blindspot: bool, turn_signal: bool, show_signal: bool,
+                              show_blindspot: bool, flicker_active: bool) -> rl.Color:
+  """Return the exact color (including transparent flicker phases) painted this frame."""
+  if turn_signal and show_signal:
+    if blindspot:
+      return TRAFFIC_COLOR if flicker_active else CEM_OVERRIDE_COLOR
+    return CEM_OVERRIDE_COLOR if flicker_active else rl.Color(0, 0, 0, 0)
+  if blindspot and show_blindspot:
+    return TRAFFIC_COLOR
+  return rl.Color(0, 0, 0, 0)
 
 
 def _csc_state():
@@ -170,9 +199,10 @@ def _render_csc_glow(border_rect: rl.Rectangle, border_width: float = UI_BORDER_
 _smoothed_steer = 0.0
 
 
-def render_background_effects(rect: rl.Rectangle, border_width: float):
+def render_background_effects(rect: rl.Rectangle, border_width: float) -> NativeSideWarningVisibility:
   global _smoothed_steer
   sm = ui_state.sm
+  native_visibility = NativeSideWarningVisibility()
 
   # 1. Turn Signal and Blind Spot indicators
   car_state = sm["carState"] if sm.valid.get("carState", False) else None
@@ -194,31 +224,20 @@ def render_background_effects(rect: rl.Rectangle, border_width: float):
         interval = 250 if show_blindspot and (left_blindspot or right_blindspot) else 500
         flicker_active = (int(rl.get_time() * 1000) % (interval * 2)) < interval
 
-        def get_half_border_color(blindspot, turn_signal):
-          if turn_signal and show_signal:
-            if blindspot:
-              return TRAFFIC_COLOR if flicker_active else CEM_OVERRIDE_COLOR
-            else:
-              return CEM_OVERRIDE_COLOR if flicker_active else rl.Color(0, 0, 0, 0)
-          elif blindspot and show_blindspot:
-            return TRAFFIC_COLOR
-          else:
-            return rl.Color(0, 0, 0, 0)
-
-        left_color = get_half_border_color(left_blindspot, left_blinker)
-        right_color = get_half_border_color(right_blindspot, right_blinker)
+        left_color = native_side_warning_color(left_blindspot, left_blinker, show_signal,
+                                               show_blindspot, flicker_active)
+        right_color = native_side_warning_color(right_blindspot, right_blinker, show_signal,
+                                                show_blindspot, flicker_active)
 
         # Draw left side borders
         if left_color.a > 0:
-          rl.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width // 2), int(rect.height))
-          rl.draw_rectangle_rounded(rect, 0.12, 10, left_color)
-          rl.end_scissor_mode()
+          draw_curved_side_warning(rect, left_color, True)
 
         # Draw right side borders
         if right_color.a > 0:
-          rl.begin_scissor_mode(int(rect.x + rect.width // 2), int(rect.y), int(rect.width // 2), int(rect.height))
-          rl.draw_rectangle_rounded(rect, 0.12, 10, right_color)
-          rl.end_scissor_mode()
+          draw_curved_side_warning(rect, right_color, False)
+
+        native_visibility = NativeSideWarningVisibility(left_color.a > 0, right_color.a > 0)
 
   # 2. Steering Torque Border
   car_control = sm["carControl"] if sm.valid.get("carControl", False) else None
@@ -252,6 +271,8 @@ def render_background_effects(rect: rl.Rectangle, border_width: float):
 
         rl.draw_rectangle_rounded(rect, 0.12, 10, col)
         rl.end_scissor_mode()
+
+  return native_visibility
 
 
 _effects: list[BorderEffect] = [

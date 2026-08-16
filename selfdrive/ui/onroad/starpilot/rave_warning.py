@@ -94,26 +94,30 @@ def warning_state_from_submaster(sm, now: float | None = None) -> RaveWarningSta
   return evaluate_rave_warning(data)
 
 
-def render_rave_warnings(rect, border_width: float, sm, now: float | None = None) -> RaveWarningState:
-  """Draw native Raylib side warnings using the original Gate 2C visual contract."""
+def render_rave_warnings(rect, border_width: float, sm, native_visibility=None,
+                         now: float | None = None) -> RaveWarningState:
+  """Draw eligible RAVE states with StarPilot's curved side-warning primitive."""
   state = warning_state_from_submaster(sm, now)
   if state.left == RaveVisualSeverity.NONE and state.right == RaveVisualSeverity.NONE:
     return state
 
   import pyray as rl
+  from openpilot.selfdrive.ui.onroad.starpilot.starpilot_border import draw_curved_side_warning
 
-  watch_width = max(1, int(round(border_width / 2.0)))
+  separator_width = max(1, int(round(border_width * 0.10)))
   warning_width = max(1, int(round(border_width)))
-  caution_amber = rl.Color(255, 179, 0, 210)
+  caution_yellow = rl.Color(255, 230, 0, 235)
   urgent_red = rl.Color(255, 59, 48, 235)
+  separator = rl.Color(0, 0, 0, 235)
 
   def draw_side(severity: RaveVisualSeverity, left: bool) -> None:
-    if severity == RaveVisualSeverity.NONE:
+    native_visible = bool(getattr(native_visibility, "left" if left else "right", False))
+    if severity == RaveVisualSeverity.NONE or native_visible:
       return
-    width = warning_width if severity == RaveVisualSeverity.WARNING else watch_width
-    color = urgent_red if severity == RaveVisualSeverity.WARNING else caution_amber
-    x = int(round(rect.x if left else rect.x + rect.width - width))
-    rl.draw_rectangle(x, int(round(rect.y)), width, int(round(rect.height)), color)
+    color = urgent_red if severity == RaveVisualSeverity.WARNING else caution_yellow
+    fill_width = max(1, warning_width - separator_width)
+    draw_curved_side_warning(rect, separator, left, warning_width)
+    draw_curved_side_warning(rect, color, left, fill_width)
 
   draw_side(state.left, True)
   draw_side(state.right, False)

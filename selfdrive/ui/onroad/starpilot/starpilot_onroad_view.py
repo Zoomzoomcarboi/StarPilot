@@ -81,7 +81,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     border_width = self._get_border_width()
     border_color = get_screen_edge_color(ui_state)
     rl.draw_rectangle_rounded(rect, 0.12, 10, border_color)
-    render_background_effects(rect, border_width)
+    self._native_side_warning_visibility = render_background_effects(rect, border_width)
 
     self._hud_renderer.draw_current_speed = (
       ui_state.started and not self._stopped_timer_widget.replaces_current_speed
@@ -109,7 +109,8 @@ class StarPilotOnroadView(AugmentedRoadView):
     render_overlay(border_rect, border_width)
     # Full openpilot/StarPilot alerts take precedence over advisory RAVE visuals.
     if not self._full_alert_showing():
-      render_rave_warnings(rect, border_width, ui_state.sm)
+      render_rave_warnings(rect, border_width, ui_state.sm,
+                           getattr(self, "_native_side_warning_visibility", None))
 
   def _render_slc(self):
     if self._full_alert_showing():
