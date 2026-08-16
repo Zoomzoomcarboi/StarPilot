@@ -82,6 +82,27 @@ RAVE is an **advisory rear-awareness system**, not a vehicle-control authority.
 - The external RAVE computer must be able to disappear, reboot, lose power, lose Ethernet, or fail authentication without preventing normal StarPilot/openpilot operation.
 - Keep the Pi -> C3X data contract minimal: authenticated health/availability and already-determined RAVE state/threat metadata. Do not move perception reasoning onto the C3X for convenience.
 
+### Architecture delta review
+
+RAVE runtime changes must be reviewed for architectural impact, not only local correctness.
+
+Treat a change as a potential architecture change if it introduces or modifies:
+
+- Runtime inputs, outputs, subscriptions, or transmissions.
+- Cereal/SubMaster/PubMaster dependencies.
+- Network paths, sockets, polling, timers, or scheduled work.
+- Processes, threads, queues, or cross-process dependencies.
+- Persistent state ownership.
+- Data-flow direction or threat/state authority.
+- Failure/stale-data behavior.
+- Default build behavior.
+- Pi 5 or C3X latency/compute cost.
+
+For any new runtime dependency, determine why it belongs in that process, whether it is required by the documented RAVE architecture, what new coupling it creates, and how it behaves when unavailable, stale, delayed, or malformed.
+
+If its architectural necessity cannot be demonstrated from this contract, flag it for explicit architecture review.
+
+**Do not review only whether new runtime behavior is implemented correctly. Review whether that behavior should exist in that process at all.**
 ---
 
 ## 4. Preserve the validated RX-only runtime architecture
