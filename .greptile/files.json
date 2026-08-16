@@ -1,0 +1,8 @@
+{
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "description": "Authoritative RAVE engineering contract. Treat this file as the source of truth for RAVE architecture, safety, latency, runtime dependencies, integration, validation, and quality requirements."
+    }
+  ]
+}
