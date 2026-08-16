@@ -1,5 +1,27 @@
 #include "starpilot/ui/qt/onroad/starpilot_onroad.h"
 
+namespace {
+
+const QColor RAVE_WATCH_COLOR(255, 255, 96);
+const QColor RAVE_WARNING_COLOR(255, 45, 45);
+
+void paintCurvedSideWarning(QPainter &p, const QRect &rect, bool left, const QColor &color, int inset = 0) {
+  constexpr qreal roundness = 0.12;
+  const QRect warning_rect = rect.adjusted(inset, inset, -inset, -inset);
+  const qreal radius = std::min(warning_rect.width(), warning_rect.height()) * roundness / 2.0;
+  const QRect side = left ? QRect(rect.left(), rect.top(), rect.width() / 2, rect.height())
+                          : QRect(rect.left() + rect.width() / 2, rect.top(), rect.width() / 2, rect.height());
+
+  p.save();
+  p.setClipRect(side, Qt::IntersectClip);
+  p.setPen(Qt::NoPen);
+  p.setBrush(color);
+  p.drawRoundedRect(warning_rect, radius, radius);
+  p.restore();
+}
+
+}  // namespace
+
 StarPilotOnroadWindow::StarPilotOnroadWindow(QWidget *parent) : QWidget(parent) {
   signalTimer = new QTimer(this);
   QObject::connect(signalTimer, &QTimer::timeout, [this] {
@@ -60,6 +82,11 @@ void StarPilotOnroadWindow::updateState(const UIState &s, const StarPilotUIState
   showSignal = (turnSignalLeft || turnSignalRight) && starpilot_toggles.value("signal_metrics").toBool();
   showSteering = starpilot_toggles.value("steering_metrics").toBool();
 
+  leftNativeSideVisual = nativeSideVisual(showBlindspot, blindSpotLeft, showSignal,
+                                          turnSignalLeft, flickerActive);
+  rightNativeSideVisual = nativeSideVisual(showBlindspot, blindSpotRight, showSignal,
+                                           turnSignalRight, flickerActive);
+
   if (showSteering) {
     float absTorque = std::abs(torque);
     smoothedSteer = 0.25f * absTorque + 0.75f * smoothedSteer;
@@ -69,22 +96,20 @@ void StarPilotOnroadWindow::updateState(const UIState &s, const StarPilotUIState
   }
 
   if (showBlindspot || showSignal) {
-    std::function<QColor(bool, bool)> getBorderColor = [&](bool blindSpot, bool turnSignal) {
-      if (turnSignal && showSignal) {
-        if (blindSpot) {
-          return flickerActive ? bg_colors[STATUS_TRAFFIC_MODE_ENABLED] : bg_colors[STATUS_CEM_DISABLED];
-        } else {
-          return flickerActive ? bg_colors[STATUS_CEM_DISABLED] : bg;
-        }
-      } else if (blindSpot && showBlindspot) {
-        return bg_colors[STATUS_TRAFFIC_MODE_ENABLED];
-      } else {
-        return bg;
+    const auto getBorderColor = [&](NativeSideVisual visual) {
+      switch (visual) {
+        case NativeSideVisual::TRAFFIC_MODE:
+          return bg_colors[STATUS_TRAFFIC_MODE_ENABLED];
+        case NativeSideVisual::CEM_DISABLED:
+          return bg_colors[STATUS_CEM_DISABLED];
+        case NativeSideVisual::BACKGROUND:
+        default:
+          return bg;
       }
     };
 
-    leftBorderColor = getBorderColor(blindSpotLeft, turnSignalLeft);
-    rightBorderColor = getBorderColor(blindSpotRight, turnSignalRight);
+    leftBorderColor = getBorderColor(leftNativeSideVisual);
+    rightBorderColor = getBorderColor(rightNativeSideVisual);
 
     int interval = showBlindspot ? 250 : 500;
     if (!signalTimer->isActive() || signalTimer->interval() != interval) {
@@ -143,23 +168,17 @@ void StarPilotOnroadWindow::paintEvent(QPaintEvent *event) {
 }
 
 void StarPilotOnroadWindow::paintRaveWarnings(QPainter &p) {
-  constexpr int watch_width = UI_BORDER_SIZE / 2;
-  constexpr int warning_width = UI_BORDER_SIZE;
-  const QColor caution_amber(255, 179, 0, 210);
-  const QColor urgent_red(255, 59, 48, 235);
+  const auto paint_side = [&](RaveVisualSeverity severity, bool left, bool native_visible) {
+    if (!shouldPaintRaveWarning(severity, native_visible)) return;
 
-  const auto paint_side = [&](RaveVisualSeverity severity, bool left) {
-    if (severity == RaveVisualSeverity::NONE) return;
-
-    const int width = severity == RaveVisualSeverity::WARNING ? warning_width : watch_width;
-    const QColor &color = severity == RaveVisualSeverity::WARNING ? urgent_red : caution_amber;
-    const int x = left ? rect.left() : rect.right() - width + 1;
-    p.fillRect(QRect(x, rect.top(), width, rect.height()), color);
+    const QColor &color = severity == RaveVisualSeverity::WARNING ? RAVE_WARNING_COLOR : RAVE_WATCH_COLOR;
+    paintCurvedSideWarning(p, rect, left, Qt::black);
+    paintCurvedSideWarning(p, rect, left, color, raveSeparatorWidth(UI_BORDER_SIZE));
   };
 
   p.save();
-  paint_side(raveWarning.left, true);
-  paint_side(raveWarning.right, false);
+  paint_side(raveWarning.left, true, nativeSideWarningVisible(leftNativeSideVisual));
+  paint_side(raveWarning.right, false, nativeSideWarningVisible(rightNativeSideVisual));
   p.restore();
 }
 

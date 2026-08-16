@@ -37,6 +37,8 @@ private:
   bool turnSignalLeft;
   bool turnSignalRight;
 
+  NativeSideVisual leftNativeSideVisual = NativeSideVisual::BACKGROUND;
+  NativeSideVisual rightNativeSideVisual = NativeSideVisual::BACKGROUND;
   RaveWarningState raveWarning;
 
   float smoothedSteer;

@@ -109,3 +109,72 @@ TEST_CASE("RAVE threats preserve severity and side independence") {
     REQUIRE(evaluateRaveWarning(input) == without_factory_bsm);
   }
 }
+
+TEST_CASE("native urgent side warnings retain visual priority") {
+  REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::NONE, false));
+  REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH, false));
+  REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WARNING, false));
+  REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH, true));
+  REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::WARNING, true));
+}
+
+TEST_CASE("RAVE suppression follows actual native side rendering") {
+  SECTION("blind-spot warning render gate") {
+    const auto native_visual = nativeSideVisual(true, true, false, false, false);
+    REQUIRE(native_visual == NativeSideVisual::TRAFFIC_MODE);
+    REQUIRE(nativeSideWarningVisible(native_visual));
+    REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH, nativeSideWarningVisible(native_visual)));
+    REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::WARNING, nativeSideWarningVisible(native_visual)));
+  }
+
+  SECTION("underlying blind-spot state with its visual gated off") {
+    const bool native_visible = nativeSideWarningVisible(nativeSideVisual(false, true, false, false, false));
+    REQUIRE_FALSE(native_visible);
+    REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH, native_visible));
+  }
+
+  SECTION("turn-signal flicker on paints native and suppresses RAVE") {
+    const auto native_visual = nativeSideVisual(false, false, true, true, true);
+    REQUIRE(native_visual == NativeSideVisual::CEM_DISABLED);
+    REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::WARNING,
+                                         nativeSideWarningVisible(native_visual)));
+  }
+
+  SECTION("turn-signal flicker off paints background and leaves RAVE eligible") {
+    const auto native_visual = nativeSideVisual(false, false, true, true, false);
+    REQUIRE(native_visual == NativeSideVisual::BACKGROUND);
+    REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH,
+                                   nativeSideWarningVisible(native_visual)));
+  }
+
+  SECTION("opposite sides remain independent") {
+    const bool native_left = nativeSideWarningVisible(nativeSideVisual(true, true, false, false, false));
+    const bool native_right = nativeSideWarningVisible(nativeSideVisual(true, false, false, false, false));
+    REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH, native_left));
+    REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WARNING, native_right));
+
+    REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH, native_right));
+    REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::WARNING, native_left));
+  }
+
+  SECTION("no native visual leaves RAVE eligibility unchanged") {
+    const bool native_visible = nativeSideWarningVisible(nativeSideVisual(false, false, false, false, false));
+    REQUIRE_FALSE(native_visible);
+    REQUIRE_FALSE(shouldPaintRaveWarning(RaveVisualSeverity::NONE, native_visible));
+    REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WATCH, native_visible));
+    REQUIRE(shouldPaintRaveWarning(RaveVisualSeverity::WARNING, native_visible));
+  }
+}
+
+TEST_CASE("native side visual preserves blind-spot and combined flicker behavior") {
+  REQUIRE(nativeSideVisual(true, true, false, false, false) == NativeSideVisual::TRAFFIC_MODE);
+  REQUIRE(nativeSideVisual(true, true, true, true, true) == NativeSideVisual::TRAFFIC_MODE);
+  REQUIRE(nativeSideVisual(true, true, true, true, false) == NativeSideVisual::CEM_DISABLED);
+  REQUIRE(nativeSideVisual(false, false, false, false, true) == NativeSideVisual::BACKGROUND);
+}
+
+TEST_CASE("RAVE curved warning style includes a scaled separator") {
+  REQUIRE(RAVE_SEPARATOR_WIDTH_DIVISOR > 1);
+  REQUIRE(raveSeparatorWidth(30) == 5);
+  REQUIRE(raveSeparatorWidth(3) == 1);
+}

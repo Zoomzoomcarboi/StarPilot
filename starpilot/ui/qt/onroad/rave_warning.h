@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 
 #include "cereal/gen/cpp/custom.capnp.h"
@@ -12,6 +13,14 @@ enum class RaveVisualSeverity : uint8_t {
   WATCH,
   WARNING,
 };
+
+enum class NativeSideVisual : uint8_t {
+  BACKGROUND,
+  TRAFFIC_MODE,
+  CEM_DISABLED,
+};
+
+constexpr int RAVE_SEPARATOR_WIDTH_DIVISOR = 6;
 
 struct RaveWarningState {
   RaveVisualSeverity left = RaveVisualSeverity::NONE;
@@ -47,6 +56,30 @@ inline RaveVisualSeverity raveVisualSeverity(cereal::RaveState::ThreatLevel thre
     default:
       return RaveVisualSeverity::NONE;
   }
+}
+
+inline bool shouldPaintRaveWarning(RaveVisualSeverity severity, bool native_urgent) {
+  return severity != RaveVisualSeverity::NONE && !native_urgent;
+}
+
+inline NativeSideVisual nativeSideVisual(bool show_blindspot, bool blindspot,
+                                         bool show_signal, bool turn_signal,
+                                         bool flicker_active) {
+  if (turn_signal && show_signal) {
+    if (blindspot) {
+      return flicker_active ? NativeSideVisual::TRAFFIC_MODE : NativeSideVisual::CEM_DISABLED;
+    }
+    return flicker_active ? NativeSideVisual::CEM_DISABLED : NativeSideVisual::BACKGROUND;
+  }
+  return blindspot && show_blindspot ? NativeSideVisual::TRAFFIC_MODE : NativeSideVisual::BACKGROUND;
+}
+
+inline bool nativeSideWarningVisible(NativeSideVisual visual) {
+  return visual != NativeSideVisual::BACKGROUND;
+}
+
+inline int raveSeparatorWidth(int scaled_border_width) {
+  return std::max(1, scaled_border_width / RAVE_SEPARATOR_WIDTH_DIVISOR);
 }
 
 inline RaveWarningState evaluateRaveWarning(const RaveWarningInput &input) {
